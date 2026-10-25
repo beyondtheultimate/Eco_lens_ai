@@ -5,6 +5,7 @@ import type {
   OllamaHealthStatus,
   VisionHealthStatus,
 } from "../types";
+import { optimizeImageForVision } from "../utils/imageOptimizer";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
@@ -99,24 +100,46 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     sessionStorage.setItem("ecolens_latest_preview", previewUrl);
 
     try {
+      // Automatically optimize high-resolution photographs to prevent multi-megabyte payloads
+      // and ensure swift serverless vision processing.
+      const payloadFile = await optimizeImageForVision(file);
+
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("image", payloadFile);
       if (municipality && municipality.trim() !== "") {
         formData.append("municipality", municipality.trim());
       }
+
+      // 55-second client timeout controller (coordinates with 45s backend timeout and 60s Vercel ceiling)
+      const abortController = new AbortController();
+      const timeoutTimer = setTimeout(() => {
+        abortController.abort();
+      }, 55000);
 
       let response: Response;
       try {
         response = await fetch(`${API_BASE}/api/analyze`, {
           method: "POST",
           body: formData,
+          signal: abortController.signal,
         });
       } catch (fetchErr) {
+        clearTimeout(timeoutTimer);
         const netErr = fetchErr as Error;
+        if (netErr.name === "AbortError" || netErr.message?.toLowerCase().includes("aborted")) {
+          throw {
+            message:
+              "Analysis request timed out in the browser after 55 seconds waiting for the AI vision response. Upstream AI processing took longer than expected.",
+            actionRequired:
+              "Please try uploading a smaller image or retry in a few moments. If deployed on Vercel, verify your GEMINI_API_KEY.",
+          };
+        }
         throw {
           message: `Network connection to '${API_BASE || "/api/analyze"}' failed: ${netErr.message}. Ensure the backend server is running and reachable.`,
           actionRequired: "Start the EcoLens backend with 'npm run dev' or check your VITE_API_URL environment variable.",
         };
+      } finally {
+        clearTimeout(timeoutTimer);
       }
 
       // Safely read response text before attempting JSON parsing

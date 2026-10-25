@@ -142,6 +142,41 @@ async function runTests() {
   );
   console.log(" [PASS] Gemini error diagnostics formatting verified.");
 
+  // 6. Schema Normalization & Tolerance Test
+  console.log("Test 6: AI Output Schema Normalization & Tolerance...");
+  const {
+    normalizePrimaryCategory,
+    normalizeCertainty,
+    normalizeStringArray,
+    normalizeMaterials,
+  } = await import("../src/services/ollamaService.js");
+
+  assert.equal(normalizePrimaryCategory("plastic"), "Plastics");
+  assert.equal(normalizePrimaryCategory("cardboard packaging"), "Paper & Cardboard");
+  assert.equal(normalizePrimaryCategory("aluminum soda can"), "Metals");
+  assert.equal(normalizePrimaryCategory("food scraps"), "Organics & Compost");
+  assert.equal(normalizePrimaryCategory("broken laptop charger"), "E-Waste");
+
+  assert.equal(normalizeCertainty("High"), "high");
+  assert.equal(normalizeCertainty("Moderate"), "medium");
+  assert.equal(normalizeCertainty("Uncertain / Low"), "low");
+
+  const normalizedArr = normalizeStringArray("Step 1. Rinse container.\nStep 2. Flatten box.", []);
+  assert.equal(normalizedArr.length, 2);
+
+  const normalizedMaterials = normalizeMaterials(
+    [
+      { material: "PET #1", percentage: "85%", recyclable: "yes" },
+      { name: "PP #5", percentage: 15, recyclable: true },
+    ],
+    "Plastics",
+    true
+  );
+  assert.equal(normalizedMaterials.length, 2);
+  assert.equal(normalizedMaterials[0].percentage, 85);
+  assert.equal(normalizedMaterials[0].recyclable, true);
+  console.log(" [PASS] AI output schema normalization verified.");
+
   console.log("=== ALL BACKEND UNIT TESTS PASSED ===");
 }
 

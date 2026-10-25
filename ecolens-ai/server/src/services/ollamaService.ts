@@ -51,7 +51,7 @@ interface CachedModelList {
   timestamp: number;
 }
 let cachedModels: CachedModelList | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache
 
 /**
  * Queries the official Gemini API model-list endpoint:
@@ -72,7 +72,7 @@ export async function fetchAvailableGeminiModels(
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, {
       method: "GET",
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(5000),
     });
 
     if (!res.ok) {
@@ -111,38 +111,28 @@ export async function fetchAvailableGeminiModels(
 }
 
 /**
- * Resolves the optimal vision model to use:
- * 1. If explicit env GEMINI_MODEL is set, validates against available models.
- * 2. Matches against prioritized list (gemini-3.8-flash, gemini-2.5-flash, gemini-2.0-flash, etc.).
- * 3. Falls back to any available model with 'flash' in its name.
- * 4. Defaults to sanitized GEMINI_MODEL or gemini-3.8-flash.
+ * Resolves the vision model to use with ZERO extra network roundtrips on the critical path:
+ * 1. Uses explicit GEMINI_MODEL if configured.
+ * 2. Uses cached models if available from a previous discovery.
+ * 3. Defaults directly to "gemini-3.8-flash".
+ * Dynamic discovery and automatic retry is only triggered if the primary request returns 404.
  */
 export async function resolveGeminiVisionModel(apiKey: string): Promise<string> {
   const envModel = process.env.GEMINI_MODEL ? sanitizeGeminiModelName(process.env.GEMINI_MODEL) : null;
-  const available = await fetchAvailableGeminiModels(apiKey);
+  if (envModel) {
+    return envModel;
+  }
 
-  if (available.length > 0) {
-    // If user specified GEMINI_MODEL explicitly and it is valid for this key, use it
-    if (envModel && available.includes(envModel)) {
-      return envModel;
-    }
-
-    // Check prioritized candidates
+  if (cachedModels && cachedModels.models.length > 0) {
     for (const candidate of GEMINI_MODEL_PREFERENCES) {
-      if (available.includes(candidate)) {
+      if (cachedModels.models.includes(candidate)) {
         return candidate;
       }
     }
-
-    // Try finding any flash model
-    const anyFlash = available.find((m) => m.toLowerCase().includes("flash"));
-    if (anyFlash) return anyFlash;
-
-    // Use first available model supporting generateContent
-    return available[0];
+    return cachedModels.models[0];
   }
 
-  return envModel || DEFAULT_GEMINI_MODEL;
+  return DEFAULT_GEMINI_MODEL;
 }
 
 /**
@@ -198,7 +188,8 @@ export function formatGeminiError(
 }
 
 /**
- * Executes a Gemini generateContent call, with automatic dynamic recovery if HTTP 404 is encountered.
+ * Executes a Gemini generateContent call, with a sensible 45-second timeout
+ * and automatic dynamic recovery if HTTP 404 is encountered.
  */
 async function callGeminiGenerateContent(
   apiKey: string,
@@ -232,12 +223,23 @@ async function callGeminiGenerateContent(
     cleanModel
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const response = await fetch(primaryUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(60000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(primaryUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(45000), // 45 seconds coordinated with Vercel's 60s maxDuration
+    });
+  } catch (fetchErr) {
+    const netErr = fetchErr as Error;
+    if (netErr.name === "TimeoutError" || netErr.message?.toLowerCase().includes("timeout") || netErr.message?.toLowerCase().includes("aborted")) {
+      throw new Error(
+        `MULTIMODAL_INFERENCE_TIMEOUT: Google Gemini API (${cleanModel}) did not complete vision generation within 45 seconds. The image may be too large or the API endpoint is experiencing latency.`
+      );
+    }
+    throw new Error(`Gemini connection error: ${netErr.message}`);
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -260,12 +262,23 @@ async function callGeminiGenerateContent(
           fallbackModel
         )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-        const retryRes = await fetch(fallbackUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(60000),
-        });
+        let retryRes: Response;
+        try {
+          retryRes = await fetch(fallbackUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(45000),
+          });
+        } catch (retryErr) {
+          const netErr = retryErr as Error;
+          if (netErr.name === "TimeoutError" || netErr.message?.toLowerCase().includes("timeout") || netErr.message?.toLowerCase().includes("aborted")) {
+            throw new Error(
+              `MULTIMODAL_INFERENCE_TIMEOUT: Gemini fallback model (${fallbackModel}) timed out after 45 seconds.`
+            );
+          }
+          throw retryErr;
+        }
 
         if (retryRes.ok) {
           const retryData = (await retryRes.json()) as {
@@ -325,26 +338,36 @@ export async function checkVisionHealth(): Promise<VisionHealthStatus> {
   let ollamaModelInstalled = false;
   let installedModels: string[] = [];
 
-  try {
-    const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
-      method: "GET",
-      signal: AbortSignal.timeout(3000),
-    });
+  // In cloud/serverless environments (Vercel, AWS Lambda, or production with Gemini configured),
+  // skip trying to connect to localhost:11434 to avoid wasting 1-3 seconds on connection timeouts.
+  const isCloudEnvironment = Boolean(
+    process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      (geminiConfigured && process.env.NODE_ENV === "production" && OLLAMA_HOST.includes("localhost"))
+  );
 
-    if (res.ok) {
-      const data = (await res.json()) as { models?: Array<{ name: string }> };
-      installedModels = (data.models || []).map((m) => m.name);
-      ollamaOnline = true;
-      ollamaModelInstalled = installedModels.some(
-        (name) =>
-          name === TARGET_MODEL ||
-          name.startsWith(`${TARGET_MODEL}:`) ||
-          name.includes(TARGET_MODEL)
-      );
+  if (!isCloudEnvironment) {
+    try {
+      const res = await fetch(`${OLLAMA_HOST}/api/tags`, {
+        method: "GET",
+        signal: AbortSignal.timeout(800), // tight 800ms timeout for local checks
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as { models?: Array<{ name: string }> };
+        installedModels = (data.models || []).map((m) => m.name);
+        ollamaOnline = true;
+        ollamaModelInstalled = installedModels.some(
+          (name) =>
+            name === TARGET_MODEL ||
+            name.startsWith(`${TARGET_MODEL}:`) ||
+            name.includes(TARGET_MODEL)
+        );
+      }
+    } catch {
+      ollamaOnline = false;
+      ollamaModelInstalled = false;
     }
-  } catch {
-    ollamaOnline = false;
-    ollamaModelInstalled = false;
   }
 
   // Determine active provider
@@ -386,28 +409,210 @@ export async function checkOllamaHealth() {
 }
 
 export interface RawVisionOutput {
-  itemName: string;
-  primaryCategory:
-    | "Plastics"
-    | "Paper & Cardboard"
-    | "Glass"
-    | "Metals"
-    | "Organics & Compost"
-    | "E-Waste"
-    | "Hazardous / Batteries"
-    | "Textiles"
-    | "Mixed / Landfill";
-  certainty: "low" | "medium" | "high";
-  certaintyReasoning: string;
-  visibleEvidence: string[];
-  materials: MaterialEstimate[];
-  recyclingCategory: string;
-  disposalInstructions: string[];
-  contaminationRisk: string;
-  uncertaintyWarnings: string[];
-  reuseSuggestions: string[];
-  detailedReusePlans?: ReuseIdeaDetail[];
-  estimatedCarbonSavedKg?: number;
+  itemName?: string;
+  primaryCategory?: string;
+  certainty?: string;
+  certaintyReasoning?: string;
+  visibleEvidence?: unknown;
+  materials?: unknown;
+  recyclingCategory?: string;
+  disposalInstructions?: unknown;
+  contaminationRisk?: string;
+  uncertaintyWarnings?: unknown;
+  reuseSuggestions?: unknown;
+  detailedReusePlans?: unknown;
+  estimatedCarbonSavedKg?: unknown;
+}
+
+/**
+ * Normalizes primaryCategory into the strict Zod schema enum without failing on minor variations.
+ */
+export function normalizePrimaryCategory(
+  cat?: string,
+  fallback: WasteAnalysisResult["primaryCategory"] = "Plastics"
+): WasteAnalysisResult["primaryCategory"] {
+  const validCategories: Array<WasteAnalysisResult["primaryCategory"]> = [
+    "Plastics",
+    "Paper & Cardboard",
+    "Glass",
+    "Metals",
+    "Organics & Compost",
+    "E-Waste",
+    "Hazardous / Batteries",
+    "Textiles",
+    "Mixed / Landfill",
+  ];
+
+  if (!cat) return fallback;
+
+  const lower = cat.toLowerCase().trim();
+  if (
+    lower.includes("plastic") ||
+    lower.includes("polymer") ||
+    lower.includes("resin") ||
+    lower.includes("pet") ||
+    lower.includes("hdpe") ||
+    lower.includes("polypropylene")
+  ) {
+    return "Plastics";
+  }
+  if (
+    lower.includes("paper") ||
+    lower.includes("cardboard") ||
+    lower.includes("carton") ||
+    lower.includes("corrugated") ||
+    lower.includes("box")
+  ) {
+    return "Paper & Cardboard";
+  }
+  if (lower.includes("glass") || lower.includes("silica") || lower.includes("cullet")) {
+    return "Glass";
+  }
+  if (
+    lower.includes("metal") ||
+    lower.includes("aluminum") ||
+    lower.includes("steel") ||
+    lower.includes("tin") ||
+    lower.includes("can") ||
+    lower.includes("foil")
+  ) {
+    return "Metals";
+  }
+  if (
+    lower.includes("organic") ||
+    lower.includes("compost") ||
+    lower.includes("food") ||
+    lower.includes("yard") ||
+    lower.includes("scraps")
+  ) {
+    return "Organics & Compost";
+  }
+  if (
+    lower.includes("e-waste") ||
+    lower.includes("electronic") ||
+    lower.includes("circuit") ||
+    lower.includes("cable") ||
+    lower.includes("charger") ||
+    lower.includes("phone")
+  ) {
+    return "E-Waste";
+  }
+  if (
+    lower.includes("hazard") ||
+    lower.includes("battery") ||
+    lower.includes("batteries") ||
+    lower.includes("chemical") ||
+    lower.includes("paint")
+  ) {
+    return "Hazardous / Batteries";
+  }
+  if (
+    lower.includes("textile") ||
+    lower.includes("cloth") ||
+    lower.includes("fabric") ||
+    lower.includes("cotton") ||
+    lower.includes("wool") ||
+    lower.includes("apparel")
+  ) {
+    return "Textiles";
+  }
+  if (
+    lower.includes("trash") ||
+    lower.includes("landfill") ||
+    lower.includes("mixed") ||
+    lower.includes("residual") ||
+    lower.includes("non-recyclable")
+  ) {
+    return "Mixed / Landfill";
+  }
+
+  const exact = validCategories.find((c) => c.toLowerCase() === lower);
+  return exact || fallback;
+}
+
+/**
+ * Normalizes certainty to strictly 'low' | 'medium' | 'high'.
+ */
+export function normalizeCertainty(val?: string): "low" | "medium" | "high" {
+  const lower = (val || "").toLowerCase().trim();
+  if (lower.includes("high") || lower.includes("strong") || lower.includes("confident")) return "high";
+  if (lower.includes("low") || lower.includes("uncertain") || lower.includes("ambiguous")) return "low";
+  return "medium";
+}
+
+/**
+ * Normalizes an array or string into a clean array of strings with a minimum size.
+ */
+export function normalizeStringArray(val: unknown, fallback: string[]): string[] {
+  if (Array.isArray(val)) {
+    const cleaned = val
+      .map((item) => (typeof item === "string" ? item.trim() : String(item).trim()))
+      .filter((s) => s.length > 0);
+    if (cleaned.length > 0) return cleaned;
+  } else if (typeof val === "string" && val.trim().length > 0) {
+    if (val.includes("\n")) {
+      const lines = val
+        .split("\n")
+        .map((s) => s.replace(/^[-*•\d.]+\s*/, "").trim())
+        .filter((s) => s.length > 1);
+      if (lines.length > 0) return lines;
+    }
+    const sentences = val
+      .split(/(?<=[.!?])\s+/)
+      .map((s) => s.replace(/^[-*•\d.]+\s*/, "").trim())
+      .filter((s) => s.length > 1);
+    if (sentences.length > 0) return sentences;
+    return [val.trim()];
+  }
+  return fallback;
+}
+
+/**
+ * Normalizes material estimates, ensuring percentage is a valid number and recyclable is a boolean.
+ */
+export function normalizeMaterials(
+  materials: unknown,
+  defaultMaterial: string,
+  defaultRecyclable: boolean
+): MaterialEstimate[] {
+  if (Array.isArray(materials) && materials.length > 0) {
+    const list: MaterialEstimate[] = [];
+    for (const item of materials) {
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const name = String(obj.material || obj.name || "").trim();
+      if (!name) continue;
+
+      let pct = 100;
+      if (typeof obj.percentage === "number") {
+        pct = Math.min(100, Math.max(0, obj.percentage));
+      } else if (typeof obj.percentage === "string") {
+        const parsed = parseFloat(obj.percentage.replace(/[^0-9.]/g, ""));
+        if (!isNaN(parsed)) pct = Math.min(100, Math.max(0, parsed));
+      }
+
+      let rec = defaultRecyclable;
+      if (typeof obj.recyclable === "boolean") {
+        rec = obj.recyclable;
+      } else if (typeof obj.recyclable === "string") {
+        rec = obj.recyclable.toLowerCase() === "true" || obj.recyclable.toLowerCase() === "yes";
+      }
+
+      const mat: MaterialEstimate = {
+        material: name,
+        percentage: pct,
+        recyclable: rec,
+      };
+      if (typeof obj.notes === "string" && obj.notes.trim()) {
+        mat.notes = obj.notes.trim();
+      }
+      list.push(mat);
+    }
+
+    if (list.length > 0) return list;
+  }
+
+  return [{ material: defaultMaterial, percentage: 100, recyclable: defaultRecyclable }];
 }
 
 const SYSTEM_PROMPT = `You are EcoLens AI, a specialized circular economy and environmental computer vision model.
@@ -514,12 +719,23 @@ export async function analyzeImageWithGemma(
       },
     };
 
-    const response = await fetch(`${OLLAMA_HOST}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-      signal: AbortSignal.timeout(90000),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${OLLAMA_HOST}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch (ollamaErr) {
+      const netErr = ollamaErr as Error;
+      if (netErr.name === "TimeoutError" || netErr.message?.toLowerCase().includes("timeout") || netErr.message?.toLowerCase().includes("aborted")) {
+        throw new Error(
+          `MULTIMODAL_INFERENCE_TIMEOUT: Local Ollama (${TARGET_MODEL}) took longer than 60 seconds to process the image.`
+        );
+      }
+      throw ollamaErr;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -600,30 +816,69 @@ export async function analyzeImageWithGemma(
 
   // Query curated knowledge base for verified municipal standards and citations
   const queryTerms = `${parsed.itemName || ""} ${parsed.primaryCategory || ""} ${(
-    parsed.materials || []
+    Array.isArray(parsed.materials) ? parsed.materials : []
   )
-    .map((m) => m.material)
+    .map((m: any) => m?.material || m?.name || "")
     .join(" ")}`;
   const knowledge = queryKnowledgeBase(queryTerms);
 
+  // Normalize category robustly
+  const finalCategory = normalizePrimaryCategory(
+    parsed.primaryCategory,
+    knowledge.category as WasteAnalysisResult["primaryCategory"]
+  );
+
+  // Normalize certainty
+  const finalCertainty = normalizeCertainty(parsed.certainty);
+
+  // Normalize visibleEvidence
+  const finalVisibleEvidence = normalizeStringArray(parsed.visibleEvidence, [
+    "Item morphology and surface texture matched standard packaging profiles.",
+  ]);
+
+  // Normalize materials
+  const finalMaterials = normalizeMaterials(
+    parsed.materials,
+    knowledge.primaryMaterial,
+    knowledge.defaultRecyclable
+  );
+
+  // Normalize disposal instructions
+  const finalDisposal = normalizeStringArray(parsed.disposalInstructions, knowledge.standardDisposal);
+
+  // Normalize uncertainty warnings
+  const finalUncertainty = normalizeStringArray(parsed.uncertaintyWarnings, [
+    "Internal multi-laminate barrier coatings cannot be fully verified from 2D photos.",
+    "Local municipal recycling sorting rules vary by jurisdiction.",
+  ]);
+
   // Normalize reuseSuggestions to at least 3 items
+  const extractedReuse = normalizeStringArray(parsed.reuseSuggestions, knowledge.defaultReuseIdeas);
   let finalReuse: string[] = [];
-  if (Array.isArray(parsed.reuseSuggestions) && parsed.reuseSuggestions.length >= 3) {
-    finalReuse = parsed.reuseSuggestions.slice(0, 3);
-  } else if (Array.isArray(parsed.reuseSuggestions) && parsed.reuseSuggestions.length > 0) {
-    finalReuse = [
-      parsed.reuseSuggestions[0],
-      parsed.reuseSuggestions[1] || knowledge.defaultReuseIdeas[1],
-      parsed.reuseSuggestions[2] || knowledge.defaultReuseIdeas[2],
-    ];
+  if (extractedReuse.length >= 3) {
+    finalReuse = extractedReuse.slice(0, 3);
   } else {
-    finalReuse = [...knowledge.defaultReuseIdeas];
+    finalReuse = [
+      extractedReuse[0] || knowledge.defaultReuseIdeas[0],
+      extractedReuse[1] || knowledge.defaultReuseIdeas[1],
+      knowledge.defaultReuseIdeas[2],
+    ];
   }
 
   // Validate or assign detailed reuse plans
   let detailedPlans: ReuseIdeaDetail[] = [];
   if (Array.isArray(parsed.detailedReusePlans) && parsed.detailedReusePlans.length > 0) {
-    detailedPlans = parsed.detailedReusePlans;
+    detailedPlans = parsed.detailedReusePlans.map((plan: any) => ({
+      title: String(plan.title || `Upcycling Plan: ${finalReuse[0]}`),
+      difficulty: ["Easy", "Moderate", "Advanced"].includes(plan.difficulty) ? plan.difficulty : "Easy",
+      requiredMaterials: Array.isArray(plan.requiredMaterials)
+        ? plan.requiredMaterials.map(String)
+        : ["Household scissors", "Clean container"],
+      steps: Array.isArray(plan.steps)
+        ? plan.steps.map(String)
+        : ["Clean item thoroughly", "Cut or repurpose for household use"],
+      safetyNotes: plan.safetyNotes ? String(plan.safetyNotes) : "Take care with sharp edges.",
+    }));
   } else {
     detailedPlans = [
       {
@@ -640,53 +895,45 @@ export async function analyzeImageWithGemma(
     ];
   }
 
+  // Estimated carbon saved
+  let finalCarbon = knowledge.averageCo2SavedKg;
+  if (typeof parsed.estimatedCarbonSavedKg === "number" && parsed.estimatedCarbonSavedKg >= 0) {
+    finalCarbon = parsed.estimatedCarbonSavedKg;
+  } else if (typeof parsed.estimatedCarbonSavedKg === "string") {
+    const parsedNum = parseFloat(parsed.estimatedCarbonSavedKg);
+    if (!isNaN(parsedNum) && parsedNum >= 0) {
+      finalCarbon = parsedNum;
+    }
+  }
+
   // Build full validated payload
   const combinedPayload = {
-    itemName: parsed.itemName || `Item (${fileName})`,
-    primaryCategory: parsed.primaryCategory || knowledge.category,
-    certainty: parsed.certainty || "medium",
+    itemName: parsed.itemName ? String(parsed.itemName).trim() : `Item (${fileName})`,
+    primaryCategory: finalCategory,
+    certainty: finalCertainty,
     certaintyReasoning:
-      parsed.certaintyReasoning ||
-      "Classification inferred from visual morphology and material cues in the uploaded photograph.",
-    visibleEvidence:
-      Array.isArray(parsed.visibleEvidence) && parsed.visibleEvidence.length > 0
-        ? parsed.visibleEvidence
-        : ["Item morphology and surface texture matched standard packaging profiles."],
-    materials:
-      Array.isArray(parsed.materials) && parsed.materials.length > 0
-        ? parsed.materials
-        : [
-            {
-              material: knowledge.primaryMaterial,
-              percentage: 100,
-              recyclable: knowledge.defaultRecyclable,
-            },
-          ],
+      typeof parsed.certaintyReasoning === "string" && parsed.certaintyReasoning.trim().length > 0
+        ? parsed.certaintyReasoning.trim()
+        : "Classification inferred from visual morphology and material cues in the uploaded photograph.",
+    visibleEvidence: finalVisibleEvidence,
+    materials: finalMaterials,
     recyclingCategory:
-      parsed.recyclingCategory ||
-      (knowledge.defaultRecyclable ? "Curbside Recyclable" : "Special Drop-Off Required"),
-    disposalInstructions:
-      Array.isArray(parsed.disposalInstructions) && parsed.disposalInstructions.length > 0
-        ? parsed.disposalInstructions
-        : knowledge.standardDisposal,
+      typeof parsed.recyclingCategory === "string" && parsed.recyclingCategory.trim().length > 0
+        ? parsed.recyclingCategory.trim()
+        : knowledge.defaultRecyclable
+        ? "Curbside Recyclable"
+        : "Special Drop-Off Required",
+    disposalInstructions: finalDisposal,
     contaminationRisk:
-      parsed.contaminationRisk ||
-      knowledge.contaminationWarnings[0] ||
-      "Check for food residue or non-removable mixed-material seals.",
-    uncertaintyWarnings:
-      Array.isArray(parsed.uncertaintyWarnings) && parsed.uncertaintyWarnings.length > 0
-        ? parsed.uncertaintyWarnings
-        : [
-            "Internal multi-laminate barrier coatings cannot be fully verified from 2D photos.",
-            "Local municipal recycling sorting rules vary by jurisdiction.",
-          ],
+      typeof parsed.contaminationRisk === "string" && parsed.contaminationRisk.trim().length > 0
+        ? parsed.contaminationRisk.trim()
+        : knowledge.contaminationWarnings[0] ||
+          "Check for food residue or non-removable mixed-material seals.",
+    uncertaintyWarnings: finalUncertainty,
     reuseSuggestions: finalReuse,
     detailedReusePlans: detailedPlans,
     citations: knowledge.citations,
-    estimatedCarbonSavedKg:
-      typeof parsed.estimatedCarbonSavedKg === "number" && parsed.estimatedCarbonSavedKg > 0
-        ? parsed.estimatedCarbonSavedKg
-        : knowledge.averageCo2SavedKg,
+    estimatedCarbonSavedKg: finalCarbon,
     modelUsed: modelIdentifier,
     analyzedAt: new Date().toISOString(),
     municipalityNote: municipality

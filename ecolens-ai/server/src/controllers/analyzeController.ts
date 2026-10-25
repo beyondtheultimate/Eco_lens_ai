@@ -141,6 +141,24 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Upstream AI inference timeout (504 Gateway Timeout)
+    if (
+      msg.includes("MULTIMODAL_INFERENCE_TIMEOUT") ||
+      msg.includes("aborted due to timeout") ||
+      msg.includes("TimeoutError") ||
+      msg.includes("timed out")
+    ) {
+      res.status(504).json({
+        error: "VISION_INFERENCE_TIMEOUT",
+        message:
+          "Multimodal vision inference timed out while awaiting the AI model response. The upstream vision model took longer than expected to process the image tokens.",
+        actionRequired:
+          "Please try uploading a smaller or compressed image, or retry in a few moments. High-resolution photos can cause upstream vision queue delays.",
+        setupUrl: "https://aistudio.google.com/apikey",
+      });
+      return;
+    }
+
     res.status(500).json({
       error: "ANALYSIS_FAILED",
       message: msg,
