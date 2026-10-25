@@ -93,8 +93,9 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         error: "VISION_MODEL_UNAVAILABLE",
         message: msg,
         actionRequired: health.ollama.isOnline
-          ? `Run 'ollama pull ${health.ollama.targetModel}' locally, or set GEMINI_API_KEY in environment variables.`
-          : "Launch Ollama desktop app, or configure GEMINI_API_KEY in server environment variables for hosted inference.",
+          ? `Run 'ollama pull ${health.ollama.targetModel}' locally, or set GEMINI_API_KEY in Vercel/server environment variables (https://aistudio.google.com/apikey).`
+          : "Configure GEMINI_API_KEY in your Vercel Project Settings > Environment Variables. Get a free API key at https://aistudio.google.com/apikey",
+        setupUrl: "https://aistudio.google.com/apikey",
         status: health,
       });
       return;

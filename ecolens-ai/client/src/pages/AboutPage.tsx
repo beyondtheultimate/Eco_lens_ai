@@ -101,8 +101,18 @@ export const AboutPage: React.FC = () => {
 
         <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
           <p>
-            <strong>Actual Model Integration:</strong> EcoLens AI is hard-wired to communicate directly with local Ollama at <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">http://localhost:11434</code> targeting <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-emerald-300">gemma4:e2b</code>. When the weights are not downloaded, the system transparently reports an offline status rather than substituting cloud models or generating fake successful results.
+            <strong>Dual-Engine Vision Architecture:</strong> EcoLens AI supports two genuine multimodal vision pipelines without fabricating AI results:
           </p>
+          <ul className="space-y-2 pl-2">
+            <li className="flex items-start gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0"></span>
+              <span><strong>Local Inference (Ollama):</strong> Connects to local Ollama (<code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">11434</code>) running <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-emerald-300">gemma4:e2b</code> or any vision-capable model on laptop edge hardware.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></span>
+              <span><strong>Cloud Serverless Inference (Google Gemini Vision):</strong> When deployed on Vercel (where localhost cannot be reached), uses Google Gemini 1.5 Flash multimodal vision via <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">GEMINI_API_KEY</code>. Free API keys can be generated at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-cyan-400 underline">aistudio.google.com/apikey</a>.</span>
+            </li>
+          </ul>
 
           <p>
             <strong>Retrieval Architecture:</strong> Our knowledge base utilizes <em>deterministic keyword matching</em> across verified EPA, GPI, AF&PA, and Call2Recycle guidelines. We do not make false claims of semantic vector search or embedding RAG.

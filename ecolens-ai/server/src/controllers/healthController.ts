@@ -11,10 +11,11 @@ export async function healthHandler(_req: Request, res: Response): Promise<void>
     visionEngine: vision,
     // Keep backward-compatible fields
     ollama: vision.ollama,
+    setupUrl: "https://aistudio.google.com/apikey",
     message: vision.isReady
       ? `Vision engine ready via ${vision.activeProvider} (${vision.activeModel})`
       : vision.ollama.isOnline
-      ? `Ollama online, but '${vision.ollama.targetModel}' is not yet downloaded. Hosted vision not configured.`
-      : "No vision model online. Run Ollama locally or configure GEMINI_API_KEY.",
+      ? `Ollama online, but '${vision.ollama.targetModel}' is not yet downloaded. Configure GEMINI_API_KEY for cloud inference (https://aistudio.google.com/apikey).`
+      : "No vision model online. Configure GEMINI_API_KEY in Vercel environment variables (https://aistudio.google.com/apikey).",
   });
 }

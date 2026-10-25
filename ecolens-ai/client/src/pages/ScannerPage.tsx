@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Server,
   Cloud,
+  ExternalLink,
 } from "lucide-react";
 import { UploadDropzone } from "../components/UploadDropzone";
 import { AnalysisLoading } from "../components/AnalysisLoading";
@@ -123,6 +124,17 @@ export const ScannerPage: React.FC = () => {
               <p className="text-[10px] text-slate-500">
                 Enables hosted Google multimodal vision when localhost is unreachable.
               </p>
+              <div className="pt-1">
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800 text-[11px] font-semibold transition-all"
+                >
+                  <span>Get Free Key (Google AI Studio)</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
             </div>
           </div>
         </div>
@@ -184,9 +196,22 @@ export const ScannerPage: React.FC = () => {
               </div>
               <p className="text-xs text-rose-200/90 leading-relaxed font-mono whitespace-pre-wrap">{errorMsg}</p>
               {actionHelp && (
-                <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-900/40 text-xs text-cyan-300 flex items-start gap-2">
-                  <ShieldAlert className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
-                  <span><strong>Recommended Action:</strong> {actionHelp}</span>
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-900/40 text-xs text-cyan-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
+                    <span><strong>Recommended Action:</strong> {actionHelp}</span>
+                  </div>
+                  {actionHelp.includes("aistudio") && (
+                    <a
+                      href="https://aistudio.google.com/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold text-[11px] shrink-0 hover:bg-cyan-500/30"
+                    >
+                      <span>Open AI Studio</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
                 </div>
               )}
             </div>

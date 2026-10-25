@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx tests/api.test.ts && tsx tests/validation.test.ts"
+    "test": "tsx tests/api.test.ts && tsx tests/validation.test.ts && tsx tests/serverless.test.ts"
   },
   "keywords": ["ecolens", "gemma4", "ollama", "waste-analysis", "recycling"],
   "author": "EcoLens AI Team",

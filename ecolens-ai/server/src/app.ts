@@ -6,16 +6,13 @@ import { analyzeHandler } from "./controllers/analyzeController.js";
 
 export const app = express();
 
-// Enable CORS for frontend Vite development & preview servers
+// Enable CORS dynamically for all origins (localhost, Vercel deployments, custom domains)
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:3000",
-      "http://127.0.0.1:5173",
-      "http://127.0.0.1:3000",
-    ],
+    origin: true,
     credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   })
 );
 
@@ -30,9 +27,9 @@ const upload = multer({
   },
 });
 
-// Routes
-app.get("/api/health", healthHandler);
-app.post("/api/analyze", upload.single("image"), analyzeHandler);
+// Routes supporting both full paths and stripped Vercel serverless subpaths
+app.get(["/api/health", "/health", "/"], healthHandler);
+app.post(["/api/analyze", "/analyze", "/"], upload.single("image"), analyzeHandler);
 
 // Multer error handling middleware
 app.use(
