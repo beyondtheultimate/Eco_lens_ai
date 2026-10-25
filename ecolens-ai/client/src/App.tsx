@@ -24,7 +24,9 @@ export function App() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/scanner" element={<ScannerPage />} />
               <Route path="/results" element={<ResultsPage />} />
-              <Route path="/reuse" element={<ReusePage />} />
+              <Route path="/second-life" element={<ReusePage />} />
+              {/* Backward compatibility redirect for /reuse */}
+              <Route path="/reuse" element={<Navigate to="/second-life" replace />} />
               <Route path="/materials" element={<MaterialGuidePage />} />
               <Route path="/impact" element={<ImpactPage />} />
               <Route path="/history" element={<HistoryPage />} />

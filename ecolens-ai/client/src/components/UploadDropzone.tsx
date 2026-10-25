@@ -29,10 +29,23 @@ export const UploadDropzone: React.FC<UploadDropzoneProps> = ({
       return;
     }
 
-    // Validate type
-    const validTypes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
-    if (!validTypes.includes(file.type.toLowerCase())) {
-      setErrorMsg("Please upload a standard image file (JPEG, PNG, or WebP).");
+    // Validate type including JFIF, PJPEG, and filename extensions
+    const validTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+      "image/pjpeg",
+      "image/jfif",
+      "application/octet-stream",
+    ];
+
+    const validExtensions = [".jpg", ".jpeg", ".png", ".webp", ".jfif"];
+    const lowerName = file.name.toLowerCase();
+    const hasValidExt = validExtensions.some((ext) => lowerName.endsWith(ext));
+
+    if (!validTypes.includes(file.type.toLowerCase()) && !hasValidExt) {
+      setErrorMsg("Please upload a supported image file (JPEG, PNG, WebP, or JFIF).");
       return;
     }
 
@@ -59,20 +72,17 @@ export const UploadDropzone: React.FC<UploadDropzoneProps> = ({
   // Helper to load bundled demo sample items for quick hackathon presentation
   const handleSampleSelect = async (sampleName: string, sampleCategory: string) => {
     try {
-      // Create a lightweight clean demo canvas image
       const canvas = document.createElement("canvas");
       canvas.width = 600;
       canvas.height = 600;
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        // Gradient background
         const grad = ctx.createLinearGradient(0, 0, 600, 600);
         grad.addColorStop(0, "#0f172a");
         grad.addColorStop(1, "#022c22");
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, 600, 600);
 
-        // Center item silhouette
         ctx.fillStyle = "#10b981";
         ctx.beginPath();
         ctx.arc(300, 300, 150, 0, Math.PI * 2);
@@ -118,7 +128,7 @@ export const UploadDropzone: React.FC<UploadDropzoneProps> = ({
         <input
           ref={inputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/jpg,.jfif"
           className="hidden"
           disabled={isLoading}
           onChange={(e) => {
@@ -147,7 +157,7 @@ export const UploadDropzone: React.FC<UploadDropzoneProps> = ({
           <p className="text-sm text-slate-400 max-w-sm mb-4">
             {selectedFile
               ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB • Ready for analysis`
-              : "Supports JPEG, PNG, or WebP up to 5 MB for optical material breakdown."}
+              : "Supports JPEG, PNG, WebP, or JFIF up to 5 MB for optical material breakdown."}
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-2">

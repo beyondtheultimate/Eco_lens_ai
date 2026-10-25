@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { analyzeImageWithGemma } from "../services/ollamaService.js";
+import { analyzeImageWithGemma, checkVisionHealth } from "../services/ollamaService.js";
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -8,19 +8,32 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
     if (!req.file) {
       res.status(400).json({
         error: "NO_FILE_UPLOADED",
-        message: "No image file provided. Please upload a waste item photo (JPEG, PNG, or WebP).",
+        message: "No image file provided. Please upload a waste item photo (JPEG, PNG, WebP, or JFIF).",
       });
       return;
     }
 
     const { mimetype, size, buffer, originalname } = req.file;
 
-    // Validate mime type
-    const validMimes = ["image/jpeg", "image/png", "image/webp", "image/jpg"];
-    if (!validMimes.includes(mimetype.toLowerCase())) {
+    // Supported image formats including JFIF and browser variants
+    const validMimes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/jpg",
+      "image/pjpeg",
+      "image/jfif",
+      "application/octet-stream", // Many browsers assign this to .jfif
+    ];
+
+    const validExtensions = [".jpg", ".jpeg", ".png", ".webp", ".jfif"];
+    const lowerName = (originalname || "").toLowerCase();
+    const hasValidExt = validExtensions.some((ext) => lowerName.endsWith(ext));
+
+    if (!validMimes.includes(mimetype.toLowerCase()) && !hasValidExt) {
       res.status(400).json({
         error: "INVALID_FILE_TYPE",
-        message: `File type '${mimetype}' is not supported. Please upload a JPEG, PNG, or WebP image.`,
+        message: `File type '${mimetype}' is not supported. Please upload a JPEG, PNG, WebP, or JFIF image.`,
       });
       return;
     }
@@ -44,11 +57,21 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Convert buffer to base64 for Ollama
+    // Extract optional municipality from request body
+    const municipality = req.body?.municipality
+      ? String(req.body.municipality).trim()
+      : undefined;
+
+    // Convert buffer to base64
     const base64Data = buffer.toString("base64");
 
-    // Call Gemma 4 vision through Ollama
-    const analysisResult = await analyzeImageWithGemma(base64Data, originalname);
+    // Call vision engine
+    const analysisResult = await analyzeImageWithGemma(
+      base64Data,
+      originalname,
+      mimetype,
+      municipality
+    );
 
     res.status(200).json({
       success: true,
@@ -58,21 +81,21 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
     const err = error as Error;
     const msg = err.message || "Unknown error during waste analysis.";
 
-    // Specific status codes based on cause
-    if (msg.includes("not available in local Ollama")) {
+    // If model is not available or Ollama unreachable
+    if (
+      msg.includes("not been pulled") ||
+      msg.includes("not available in local Ollama") ||
+      msg.includes("No vision inference service is available") ||
+      msg.includes("unreachable")
+    ) {
+      const health = await checkVisionHealth();
       res.status(503).json({
-        error: "MODEL_NOT_FOUND",
+        error: "VISION_MODEL_UNAVAILABLE",
         message: msg,
-        actionRequired: "Approve and pull 'gemma4:e2b' model via Ollama.",
-      });
-      return;
-    }
-
-    if (msg.includes("Ollama service is unreachable")) {
-      res.status(503).json({
-        error: "OLLAMA_UNREACHABLE",
-        message: msg,
-        actionRequired: "Start Ollama desktop application or run 'ollama serve'.",
+        actionRequired: health.ollama.isOnline
+          ? `Run 'ollama pull ${health.ollama.targetModel}' locally, or set GEMINI_API_KEY in environment variables.`
+          : "Launch Ollama desktop app, or configure GEMINI_API_KEY in server environment variables for hosted inference.",
+        status: health,
       });
       return;
     }

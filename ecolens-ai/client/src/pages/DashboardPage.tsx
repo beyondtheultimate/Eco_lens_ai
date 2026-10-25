@@ -181,7 +181,7 @@ export const DashboardPage: React.FC = () => {
                     Results
                   </Link>
                   <Link
-                    to="/reuse"
+                    to="/second-life"
                     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
                   >
                     Reuse Plan
@@ -252,7 +252,7 @@ export const DashboardPage: React.FC = () => {
           </Link>
 
           <Link
-            to="/reuse"
+            to="/second-life"
             className="p-4 rounded-xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 flex items-start gap-3 transition-all group"
           >
             <div className="h-9 w-9 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">

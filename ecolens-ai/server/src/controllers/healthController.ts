@@ -1,27 +1,20 @@
 import { Request, Response } from "express";
-import { checkOllamaHealth } from "../services/ollamaService.js";
+import { checkVisionHealth } from "../services/ollamaService.js";
 
-export async function healthHandler(_req: Request, res: Response) {
-  try {
-    const ollamaStatus = await checkOllamaHealth();
+export async function healthHandler(_req: Request, res: Response): Promise<void> {
+  const vision = await checkVisionHealth();
 
-    const healthy = ollamaStatus.isOnline;
-
-    res.status(healthy ? 200 : 503).json({
-      status: healthy ? "healthy" : "degraded",
-      service: "EcoLens AI Waste Analysis Backend",
-      timestamp: new Date().toISOString(),
-      ollama: ollamaStatus,
-      message: ollamaStatus.modelInstalled
-        ? `Ready for image analysis with ${ollamaStatus.targetModel}`
-        : ollamaStatus.isOnline
-        ? `Ollama online, but '${ollamaStatus.targetModel}' is not yet downloaded.`
-        : "Ollama service is unreachable on localhost:11434.",
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: (error as Error).message,
-    });
-  }
+  res.status(200).json({
+    status: "healthy",
+    service: "EcoLens AI Waste Analysis Backend",
+    timestamp: new Date().toISOString(),
+    visionEngine: vision,
+    // Keep backward-compatible fields
+    ollama: vision.ollama,
+    message: vision.isReady
+      ? `Vision engine ready via ${vision.activeProvider} (${vision.activeModel})`
+      : vision.ollama.isOnline
+      ? `Ollama online, but '${vision.ollama.targetModel}' is not yet downloaded. Hosted vision not configured.`
+      : "No vision model online. Run Ollama locally or configure GEMINI_API_KEY.",
+  });
 }

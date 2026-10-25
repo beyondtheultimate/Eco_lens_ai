@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import type { WasteAnalysisResult, HistoryItem, OllamaHealthStatus } from "../types";
+import type {
+  WasteAnalysisResult,
+  HistoryItem,
+  OllamaHealthStatus,
+  VisionHealthStatus,
+} from "../types";
+
+const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
 interface AnalysisContextType {
   latestResult: WasteAnalysisResult | null;
@@ -8,12 +15,14 @@ interface AnalysisContextType {
   errorMsg: string | null;
   actionHelp: string | null;
   health: OllamaHealthStatus | null;
+  visionHealth: VisionHealthStatus | null;
   checkingHealth: boolean;
   history: HistoryItem[];
   checkHealth: () => Promise<void>;
   runAnalysis: (file: File, previewUrl: string, municipality?: string) => Promise<boolean>;
   clearCurrent: () => void;
   clearHistory: () => void;
+  deleteHistoryItem: (id: string) => void;
   loadFromHistory: (item: HistoryItem) => void;
 }
 
@@ -38,6 +47,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [actionHelp, setActionHelp] = useState<string | null>(null);
 
   const [health, setHealth] = useState<OllamaHealthStatus | null>(null);
+  const [visionHealth, setVisionHealth] = useState<VisionHealthStatus | null>(null);
   const [checkingHealth, setCheckingHealth] = useState<boolean>(true);
 
   const [history, setHistory] = useState<HistoryItem[]>(() => {
@@ -52,13 +62,22 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const checkHealth = async () => {
     setCheckingHealth(true);
     try {
-      const res = await fetch("/api/health");
+      const res = await fetch(`${API_BASE}/api/health`);
+      if (!res.ok) {
+        setHealth(null);
+        setVisionHealth(null);
+        return;
+      }
       const data = await res.json();
-      if (data.ollama) {
+      if (data.visionEngine) {
+        setVisionHealth(data.visionEngine);
+        setHealth(data.visionEngine.ollama);
+      } else if (data.ollama) {
         setHealth(data.ollama);
       }
     } catch {
       setHealth(null);
+      setVisionHealth(null);
     } finally {
       setCheckingHealth(false);
     }
@@ -68,7 +87,11 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     checkHealth();
   }, []);
 
-  const runAnalysis = async (file: File, previewUrl: string, municipality?: string): Promise<boolean> => {
+  const runAnalysis = async (
+    file: File,
+    previewUrl: string,
+    municipality?: string
+  ): Promise<boolean> => {
     setIsLoading(true);
     setErrorMsg(null);
     setActionHelp(null);
@@ -78,20 +101,64 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const formData = new FormData();
       formData.append("image", file);
-      if (municipality) {
-        formData.append("municipality", municipality);
+      if (municipality && municipality.trim() !== "") {
+        formData.append("municipality", municipality.trim());
       }
 
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
-
-      const json = await response.json();
-
-      if (!response.ok) {
+      let response: Response;
+      try {
+        response = await fetch(`${API_BASE}/api/analyze`, {
+          method: "POST",
+          body: formData,
+        });
+      } catch (fetchErr) {
+        const netErr = fetchErr as Error;
         throw {
-          message: json.message || "Failed to analyze waste item.",
+          message: `Network connection to '${API_BASE || "/api/analyze"}' failed: ${netErr.message}. Ensure the backend server is running and reachable.`,
+          actionRequired: "Start the EcoLens backend with 'npm run dev' or check your VITE_API_URL environment variable.",
+        };
+      }
+
+      // Safely read response text before attempting JSON parsing
+      const contentType = response.headers.get("content-type") || "";
+      const rawText = await response.text();
+
+      if (!rawText || rawText.trim() === "") {
+        throw {
+          message: `Server returned an empty response (HTTP status ${response.status} ${response.statusText}).`,
+          actionRequired: "Check server terminal logs for runtime crashes or memory aborts.",
+        };
+      }
+
+      // Detect HTML error responses (such as SPA 404 rewrite or reverse proxy gateway errors)
+      if (contentType.includes("text/html") || rawText.trim().startsWith("<!DOCTYPE") || rawText.trim().startsWith("<html")) {
+        throw {
+          message: `The server returned an HTML webpage instead of JSON (HTTP ${response.status}). The endpoint '/api/analyze' was not found on this host.`,
+          actionRequired: "If running on Vercel, configure a remote backend URL via VITE_API_URL. If running locally, ensure the Express server is running on port 5000.",
+        };
+      }
+
+      // Safely parse JSON
+      let json: {
+        success?: boolean;
+        data?: WasteAnalysisResult;
+        error?: string;
+        message?: string;
+        actionRequired?: string;
+      };
+
+      try {
+        json = JSON.parse(rawText);
+      } catch (jsonErr) {
+        throw {
+          message: `Server returned non-JSON text (HTTP ${response.status}): ${rawText.slice(0, 200)}`,
+          actionRequired: "Inspect backend logs to ensure output is valid JSON.",
+        };
+      }
+
+      if (!response.ok || !json.data) {
+        throw {
+          message: json.message || json.error || `Analysis failed with HTTP status ${response.status}.`,
           actionRequired: json.actionRequired,
         };
       }
@@ -100,7 +167,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setLatestResult(analysisData);
       sessionStorage.setItem("ecolens_latest_result", JSON.stringify(analysisData));
 
-      // Save metadata to local history (store preview or empty image for local privacy)
+      // Append to local history
       const newHistoryItem: HistoryItem = {
         id: `${Date.now()}`,
         timestamp: new Date().toISOString(),
@@ -108,7 +175,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         result: analysisData,
       };
 
-      const updatedHistory = [newHistoryItem, ...history.slice(0, 11)];
+      const updatedHistory = [newHistoryItem, ...history.slice(0, 49)];
       setHistory(updatedHistory);
       localStorage.setItem("ecolens_history", JSON.stringify(updatedHistory));
 
@@ -139,6 +206,12 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.removeItem("ecolens_history");
   };
 
+  const deleteHistoryItem = (id: string) => {
+    const updated = history.filter((item) => item.id !== id);
+    setHistory(updated);
+    localStorage.setItem("ecolens_history", JSON.stringify(updated));
+  };
+
   const loadFromHistory = (item: HistoryItem) => {
     setLatestResult(item.result);
     setImagePreviewUrl(item.imagePreviewUrl);
@@ -155,12 +228,14 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         errorMsg,
         actionHelp,
         health,
+        visionHealth,
         checkingHealth,
         history,
         checkHealth,
         runAnalysis,
         clearCurrent,
         clearHistory,
+        deleteHistoryItem,
         loadFromHistory,
       }}
     >

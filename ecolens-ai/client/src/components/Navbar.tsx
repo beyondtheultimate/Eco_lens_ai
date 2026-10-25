@@ -19,18 +19,21 @@ import { useAnalysis } from "../context/AnalysisContext";
 
 export const Navbar: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { health, checkingHealth, checkHealth } = useAnalysis();
+  const { health, visionHealth, checkingHealth, checkHealth } = useAnalysis();
 
   const navLinks = [
     { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
     { to: "/scanner", label: "Scanner", icon: Scan },
     { to: "/results", label: "Results", icon: Layers },
-    { to: "/reuse", label: "Second Life", icon: Sparkles },
+    { to: "/second-life", label: "Second Life", icon: Sparkles },
     { to: "/materials", label: "Materials", icon: BookOpen },
     { to: "/impact", label: "Impact", icon: Compass },
     { to: "/history", label: "History", icon: History },
     { to: "/about", label: "About", icon: Info },
   ];
+
+  const isModelReady = visionHealth ? visionHealth.isReady : health ? health.modelInstalled : false;
+  const activeModelDisplay = visionHealth?.activeModel || health?.targetModel || "Gemma 4";
 
   return (
     <header className="sticky top-0 z-50 border-b border-emerald-950/60 bg-slate-950/85 backdrop-blur-xl">
@@ -85,24 +88,24 @@ export const Navbar: React.FC = () => {
           {/* Model Status Pill */}
           <button
             onClick={checkHealth}
-            title="Click to check Ollama local model connectivity"
+            title="Click to check vision inference model connectivity"
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all bg-slate-900/80 hover:bg-slate-800/90 border-slate-800"
           >
             <Cpu className="h-3.5 w-3.5 text-cyan-400" />
-            <span className="hidden md:inline text-slate-400">Gemma:</span>
+            <span className="hidden md:inline text-slate-400">Vision Engine:</span>
             {checkingHealth ? (
               <span className="text-slate-400 flex items-center gap-1 text-[11px]">
                 <Activity className="h-3 w-3 animate-spin text-cyan-400" /> Checking...
               </span>
-            ) : health?.modelInstalled ? (
+            ) : isModelReady ? (
               <span className="flex items-center gap-1.5 text-emerald-400 text-[11px] font-semibold">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                {health.targetModel}
+                {activeModelDisplay}
               </span>
             ) : health?.isOnline ? (
               <span className="flex items-center gap-1.5 text-amber-400 text-[11px] font-semibold">
                 <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-                Pull Pending
+                Setup Required
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-rose-400 text-[11px] font-semibold">

@@ -66,3 +66,14 @@ export interface OllamaHealthStatus {
   installedModels: string[];
   ollamaHost: string;
 }
+
+export interface VisionHealthStatus {
+  isReady: boolean;
+  activeProvider: "ollama" | "gemini" | "none";
+  activeModel: string;
+  ollama: OllamaHealthStatus;
+  hosted: {
+    geminiConfigured: boolean;
+    geminiModel: string;
+  };
+}

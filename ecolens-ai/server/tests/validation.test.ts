@@ -53,6 +53,19 @@ async function testValidation() {
     );
     console.log(" [PASS] Oversized 6MB file rejected with 400 FILE_TOO_LARGE.");
 
+    // 4. Test POST /api/analyze with .jfif file (should pass format check, returning 503 or 200 depending on model availability)
+    console.log("Test: POST /api/analyze with valid .jfif image file format...");
+    const jfifBlob = new Blob([new Uint8Array(1024)], { type: "image/jfif" });
+    const formDataJfif = new FormData();
+    formDataJfif.append("image", jfifBlob, "images.jfif");
+
+    const resJfif = await fetch("http://localhost:5099/api/analyze", {
+      method: "POST",
+      body: formDataJfif,
+    });
+    assert.notEqual(resJfif.status, 400, "JFIF file must not be rejected with 400 INVALID_FILE_TYPE");
+    console.log(" [PASS] JFIF image successfully accepted by upload validation.");
+
     console.log("=== ALL API VALIDATION TESTS PASSED ===");
   } finally {
     server.close();

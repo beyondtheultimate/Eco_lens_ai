@@ -318,7 +318,7 @@ Source: EcoLens AI Curated Knowledge Base (${latestResult.citations.map((c) => c
             </h3>
           </div>
           <Link
-            to="/reuse"
+            to="/second-life"
             className="text-xs text-teal-300 hover:text-teal-200 font-semibold flex items-center gap-1"
           >
             Explore Workshop Plans <ArrowRight className="h-3 w-3" />
@@ -340,7 +340,7 @@ Source: EcoLens AI Curated Knowledge Base (${latestResult.citations.map((c) => c
                 </p>
               </div>
               <Link
-                to="/reuse"
+                to="/second-life"
                 className="mt-4 pt-2 border-t border-slate-900 flex items-center justify-between text-[11px] text-teal-400 font-semibold group-hover:translate-x-1 transition-transform"
               >
                 <span>View Full Instructions</span>

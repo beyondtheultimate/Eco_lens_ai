@@ -7,6 +7,9 @@ import {
   RefreshCw,
   Cpu,
   ArrowRight,
+  ShieldAlert,
+  Server,
+  Cloud,
 } from "lucide-react";
 import { UploadDropzone } from "../components/UploadDropzone";
 import { AnalysisLoading } from "../components/AnalysisLoading";
@@ -21,6 +24,8 @@ export const ScannerPage: React.FC = () => {
     errorMsg,
     actionHelp,
     health,
+    visionHealth,
+    checkingHealth,
     checkHealth,
     clearCurrent,
   } = useAnalysis();
@@ -46,6 +51,9 @@ export const ScannerPage: React.FC = () => {
     clearCurrent();
   };
 
+  // Determine if vision engine is ready
+  const isVisionReady = visionHealth ? visionHealth.isReady : health ? health.modelInstalled : false;
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
       {/* Page Header */}
@@ -58,31 +66,65 @@ export const ScannerPage: React.FC = () => {
           Optical Waste & Material Inspection
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Upload a photograph of any discarded item or packaging. Gemma 4 will extract visible material signatures,
+          Upload a photograph of any discarded item or packaging. Our multimodal vision pipeline will extract visible material signatures,
           evaluate contamination risks, and formulate circular upcycling plans.
         </p>
       </div>
 
-      {/* Model Status Warning Banner if Gemma is not downloaded */}
-      {health && !health.modelInstalled && (
-        <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Cpu className="h-6 w-6 text-amber-400 shrink-0" />
-            <div>
-              <h4 className="text-sm font-bold text-amber-200">
-                Gemma 4 Vision Model ({health.targetModel}) Pending Local Download
-              </h4>
-              <p className="text-xs text-amber-300/80">
-                Ollama service is reachable on <code className="bg-amber-950 px-1 py-0.5 rounded font-mono text-amber-200">11434</code>, but requires <code className="bg-amber-950 px-1 py-0.5 rounded font-mono font-bold text-amber-200">ollama pull gemma4:e2b</code> to process live images.
+      {/* Model Status Diagnostic Banner */}
+      {!checkingHealth && !isVisionReady && (
+        <div className="p-5 rounded-2xl bg-amber-950/30 border border-amber-800/60 text-slate-200 space-y-3">
+          <div className="flex items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                <Cpu className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-amber-200">
+                  Vision Model Setup Required
+                </h4>
+                <p className="text-xs text-amber-300/80">
+                  No vision inference model is currently active. To perform live image analysis, enable either option:
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={checkHealth}
+              disabled={checkingHealth}
+              className="px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-800 text-amber-200 text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${checkingHealth ? "animate-spin" : ""}`} /> Re-check
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-900/40 space-y-1.5">
+              <div className="flex items-center gap-2 text-amber-300 font-semibold">
+                <Server className="h-4 w-4" /> Option 1: Local Ollama
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Run in your terminal:{" "}
+                <code className="text-amber-300 font-mono font-bold bg-slate-900 px-1 py-0.5 rounded">
+                  ollama pull gemma4:e2b
+                </code>
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Ollama status: {health?.isOnline ? "Online (11434 reachable)" : "Offline"}
+              </p>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-900/40 space-y-1.5">
+              <div className="flex items-center gap-2 text-cyan-300 font-semibold">
+                <Cloud className="h-4 w-4" /> Option 2: Cloud / Vercel Inference
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Set <code className="text-cyan-300 font-mono font-bold bg-slate-900 px-1 py-0.5 rounded">GEMINI_API_KEY</code> in your server/Vercel environment variables.
+              </p>
+              <p className="text-[10px] text-slate-500">
+                Enables hosted Google multimodal vision when localhost is unreachable.
               </p>
             </div>
           </div>
-          <button
-            onClick={checkHealth}
-            className="px-3 py-1.5 rounded-lg bg-amber-900/60 hover:bg-amber-800 text-amber-200 text-xs font-semibold flex items-center gap-1.5 shrink-0"
-          >
-            <RefreshCw className="h-3.5 w-3.5" /> Re-check Status
-          </button>
         </div>
       )}
 
@@ -119,7 +161,7 @@ export const ScannerPage: React.FC = () => {
                 onClick={handleClear}
                 className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-800 transition-all"
               >
-                Cancel
+                Clear Selection
               </button>
               <button
                 type="button"
@@ -127,7 +169,7 @@ export const ScannerPage: React.FC = () => {
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02]"
               >
                 <Scan className="h-4 w-4" />
-                <span>Run Gemma 4 Analysis</span>
+                <span>Run Resource & Analyze</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
@@ -135,15 +177,16 @@ export const ScannerPage: React.FC = () => {
 
           {/* Error Message with Help Banner */}
           {errorMsg && (
-            <div className="p-5 rounded-2xl bg-rose-950/40 border border-rose-900/60 text-slate-200 space-y-2">
+            <div className="p-5 rounded-2xl bg-rose-950/40 border border-rose-900/60 text-slate-200 space-y-3">
               <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
                 <AlertCircle className="h-5 w-5 text-rose-400" />
                 <span>Analysis Encountered an Issue</span>
               </div>
-              <p className="text-xs text-rose-200/90 leading-relaxed">{errorMsg}</p>
+              <p className="text-xs text-rose-200/90 leading-relaxed font-mono whitespace-pre-wrap">{errorMsg}</p>
               {actionHelp && (
-                <div className="mt-2 p-3 rounded-xl bg-slate-950/80 border border-rose-900/40 text-xs font-mono text-cyan-300">
-                  👉 Recommended Action: {actionHelp}
+                <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-900/40 text-xs text-cyan-300 flex items-start gap-2">
+                  <ShieldAlert className="h-4 w-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <span><strong>Recommended Action:</strong> {actionHelp}</span>
                 </div>
               )}
             </div>
