@@ -71,14 +71,18 @@ async function runTests() {
   const {
     sanitizeGeminiModelName,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_PRIMARY_MODEL,
+    DEFAULT_FALLBACK_MODEL,
+    getModelSequence,
     formatGeminiError,
     GEMINI_MODEL_PREFERENCES,
   } = await import("../src/services/ollamaService.js");
 
-  assert.equal(DEFAULT_GEMINI_MODEL, "gemini-3.8-flash", "Default model must be gemini-3.8-flash");
+  assert.equal(DEFAULT_PRIMARY_MODEL, "gemini-2.5-flash", "Primary default model must be gemini-2.5-flash");
+  assert.equal(DEFAULT_FALLBACK_MODEL, "gemini-2.0-flash", "Fallback default model must be gemini-2.0-flash");
   assert.equal(
-    sanitizeGeminiModelName("models/gemini-3.8-flash"),
-    "gemini-3.8-flash",
+    sanitizeGeminiModelName("models/gemini-2.5-flash"),
+    "gemini-2.5-flash",
     "Should strip leading 'models/' prefix"
   );
   assert.equal(
@@ -93,12 +97,18 @@ async function runTests() {
   );
   assert.equal(
     sanitizeGeminiModelName(""),
-    "gemini-3.8-flash",
-    "Empty model should default to gemini-3.8-flash"
+    "gemini-2.5-flash",
+    "Empty model should default to primary default model"
   );
+
+  const seq = getModelSequence("gemini-3.8-flash");
+  assert.equal(seq[0], "gemini-3.8-flash", "First model in sequence must be primary");
+  assert.ok(seq.includes("gemini-2.0-flash"), "Sequence must include fallback model");
+  assert.ok(seq.includes("gemini-2.5-flash"), "Sequence must include 2.5 flash");
+
   assert.ok(
-    GEMINI_MODEL_PREFERENCES.includes("gemini-3.8-flash"),
-    "Preferences should include gemini-3.8-flash"
+    GEMINI_MODEL_PREFERENCES.includes("gemini-2.5-flash"),
+    "Preferences should include gemini-2.5-flash"
   );
   console.log(" [PASS] Gemini model sanitization and preferences verified.");
 

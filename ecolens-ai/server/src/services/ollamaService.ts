@@ -9,7 +9,9 @@ import { queryKnowledgeBase } from "./knowledgeBase.js";
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const TARGET_MODEL = process.env.OLLAMA_MODEL || "gemma4:e2b";
 
-export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+export const DEFAULT_PRIMARY_MODEL = "gemini-2.5-flash";
+export const DEFAULT_FALLBACK_MODEL = "gemini-2.0-flash";
+export const DEFAULT_GEMINI_MODEL = DEFAULT_PRIMARY_MODEL;
 
 export function getGeminiApiKey(): string {
   return (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
@@ -17,34 +19,73 @@ export function getGeminiApiKey(): string {
 
 /**
  * Normalizes model names by stripping any accidental "models/" prefix or whitespace.
- * e.g. "models/gemini-3.8-flash" -> "gemini-3.8-flash"
+ * e.g. "models/gemini-2.5-flash" -> "gemini-2.5-flash"
  */
 export function sanitizeGeminiModelName(modelName?: string): string {
   if (!modelName || !modelName.trim()) {
-    return DEFAULT_GEMINI_MODEL;
+    return DEFAULT_PRIMARY_MODEL;
   }
   return modelName.trim().replace(/^models\//i, "");
 }
 
 /**
- * Returns the sanitized Gemini model identifier configured in environment variables.
+ * Returns the primary configured Gemini model from environment variables,
+ * defaulting to the stable, high-throughput gemini-2.5-flash.
  */
+export function getConfiguredPrimaryModel(): string {
+  return sanitizeGeminiModelName(
+    process.env.GEMINI_MODEL || process.env.GEMINI_PRIMARY_MODEL || DEFAULT_PRIMARY_MODEL
+  );
+}
+
+/**
+ * Returns the secondary fallback Gemini model from environment variables,
+ * defaulting to gemini-2.0-flash.
+ */
+export function getConfiguredFallbackModel(): string {
+  return sanitizeGeminiModelName(process.env.GEMINI_FALLBACK_MODEL || DEFAULT_FALLBACK_MODEL);
+}
+
 export function getConfiguredGeminiModel(): string {
-  return sanitizeGeminiModelName(process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
+  return getConfiguredPrimaryModel();
 }
 
 /**
  * Prioritized list of vision-capable Gemini models supporting generateContent.
  */
 export const GEMINI_MODEL_PREFERENCES: readonly string[] = [
-  "gemini-3.8-flash",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
-  "gemini-2.0-flash-exp",
   "gemini-1.5-flash-latest",
+  "gemini-3.8-flash",
+  "gemini-2.0-flash-exp",
   "gemini-1.5-flash",
   "gemini-1.5-pro",
 ];
+
+/**
+ * Constructs the prioritized sequence of models to attempt:
+ * [Primary Model, Configured Fallback, ...Standard Preferences]
+ */
+export function getModelSequence(primaryModel?: string): string[] {
+  const primary = sanitizeGeminiModelName(primaryModel || getConfiguredPrimaryModel());
+  const fallback = getConfiguredFallbackModel();
+
+  const sequence: string[] = [primary];
+
+  if (fallback && !sequence.includes(fallback)) {
+    sequence.push(fallback);
+  }
+
+  for (const candidate of GEMINI_MODEL_PREFERENCES) {
+    const clean = sanitizeGeminiModelName(candidate);
+    if (!sequence.includes(clean)) {
+      sequence.push(clean);
+    }
+  }
+
+  return sequence;
+}
 
 interface CachedModelList {
   models: string[];
@@ -72,7 +113,7 @@ export async function fetchAvailableGeminiModels(
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
     const res = await fetch(url, {
       method: "GET",
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(6000),
     });
 
     if (!res.ok) {
@@ -111,28 +152,10 @@ export async function fetchAvailableGeminiModels(
 }
 
 /**
- * Resolves the vision model to use with ZERO extra network roundtrips on the critical path:
- * 1. Uses explicit GEMINI_MODEL if configured.
- * 2. Uses cached models if available from a previous discovery.
- * 3. Defaults directly to "gemini-3.8-flash".
- * Dynamic discovery and automatic retry is only triggered if the primary request returns 404.
+ * Resolves the primary vision model to use without extra roundtrips on the critical path.
  */
 export async function resolveGeminiVisionModel(apiKey: string): Promise<string> {
-  const envModel = process.env.GEMINI_MODEL ? sanitizeGeminiModelName(process.env.GEMINI_MODEL) : null;
-  if (envModel) {
-    return envModel;
-  }
-
-  if (cachedModels && cachedModels.models.length > 0) {
-    for (const candidate of GEMINI_MODEL_PREFERENCES) {
-      if (cachedModels.models.includes(candidate)) {
-        return candidate;
-      }
-    }
-    return cachedModels.models[0];
-  }
-
-  return DEFAULT_GEMINI_MODEL;
+  return getConfiguredPrimaryModel();
 }
 
 /**
@@ -170,7 +193,17 @@ export function formatGeminiError(
 
   if (status === 429) {
     return new Error(
-      `Gemini Rate Limit Exceeded (HTTP 429 / RESOURCE_EXHAUSTED): Free-tier per-minute quota has been reached. Please wait 15-30 seconds before retrying. Manage quotas at https://aistudio.google.com/`
+      `Gemini Rate Limit Exceeded (HTTP 429 / RESOURCE_EXHAUSTED): Free-tier per-minute quota reached. Please wait 15-30 seconds before retrying. Manage quotas at https://aistudio.google.com/`
+    );
+  }
+
+  if (status === 503 || parsedMsg.toLowerCase().includes("high demand") || parsedMsg.toLowerCase().includes("overloaded")) {
+    const listMsg =
+      availableModels.length > 0
+        ? `Verified models on this key: [${availableModels.join(", ")}].`
+        : "";
+    return new Error(
+      `Gemini Vision API error (HTTP 503): This model is currently experiencing high demand. Models attempted: [${attemptedModel}]. ${listMsg} Please retry in a few moments.`
     );
   }
 
@@ -248,7 +281,7 @@ async function executeSingleGeminiRequest(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(25000), // 25s per single attempt to respect Vercel's 60s limit
+      signal: AbortSignal.timeout(22000), // 22s per attempt to guarantee fast fallback within Vercel limits
     });
 
     const elapsed = Date.now() - startTime;
@@ -288,7 +321,7 @@ async function executeSingleGeminiRequest(
       netErr.message?.toLowerCase().includes("aborted");
 
     console.warn(
-      `[EcoLens AI] Model '${cleanModel}' fetch failed in ${elapsed}ms: ${netErr.message}`
+      `[EcoLens AI] Model '${cleanModel}' request threw error in ${elapsed}ms: ${netErr.message}`
     );
 
     return {
@@ -312,15 +345,15 @@ async function callGeminiGenerateContent(
   cleanMime: string,
   imageBase64: string
 ): Promise<{ text: string; modelUsed: string }> {
-  const primaryModel = sanitizeGeminiModelName(initialModel);
-  const modelsToTry: string[] = [primaryModel];
+  // Build initial candidate queue: [Primary, Configured Fallback, ...Preferences]
+  const modelsToTry: string[] = getModelSequence(initialModel);
   const attemptedModels: string[] = [];
   const maxRetriesPerModel = 2; // Up to 2 retries for transient errors (total 3 attempts per model)
 
   let lastStatus = 500;
   let lastErrorText = "Unknown error";
 
-  // Outer loop: Try models (primary model first, then fallback models if primary persistently returns 503 or 404)
+  // Outer loop: Try models (primary first, then fallback models if primary persistently fails with 503/404)
   for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
     const currentModel = modelsToTry[mIdx];
     attemptedModels.push(currentModel);
@@ -369,9 +402,9 @@ async function callGeminiGenerateContent(
 
       // If transient error (503 High Demand, 429 Rate Limit, 500 Server Error) and retries remain:
       if (result.isTransient && attempt < maxRetriesPerModel) {
-        // Exponential backoff with random jitter: ~1.0s - 1.4s (attempt 0), ~2.0s - 2.4s (attempt 1)
-        const jitter = Math.floor(Math.random() * 400);
-        const backoffMs = Math.min(1000 * Math.pow(2, attempt) + jitter, 2500);
+        // Short exponential backoff with random jitter: ~500ms - 800ms (attempt 0), ~1000ms - 1400ms (attempt 1)
+        const jitter = Math.floor(Math.random() * 300);
+        const backoffMs = Math.min(500 * Math.pow(2, attempt) + jitter, 1800);
 
         console.info(
           `[EcoLens AI] Transient HTTP ${lastStatus} on '${currentModel}'. Backing off ${backoffMs}ms before retry ${
@@ -385,45 +418,34 @@ async function callGeminiGenerateContent(
       }
     }
 
-    // If current model persistently failed (e.g. 503 high demand after 2 retries, or 404) and no fallbacks queued yet:
+    // If current model persistently failed (e.g. 503 high demand after 2 retries, or 404):
     if (isModelExhausted && mIdx === 0) {
       console.warn(
-        `[EcoLens AI] Primary model '${currentModel}' is unavailable (HTTP ${lastStatus}). Querying official Models API to discover verified fallback models...`
+        `[EcoLens AI] Primary model '${currentModel}' is unavailable (HTTP ${lastStatus}). Verifying available models via official Models API...`
       );
 
-      const verifiedModels = await fetchAvailableGeminiModels(apiKey, true);
-      console.log(
-        `[EcoLens AI] Official Models API returned ${verifiedModels.length} models supporting generateContent: [${verifiedModels.join(
-          ", "
-        )}]`
-      );
+      try {
+        const verifiedModels = await fetchAvailableGeminiModels(apiKey, true);
+        if (verifiedModels.length > 0) {
+          console.log(
+            `[EcoLens AI] Official Models API returned verified models: [${verifiedModels.join(", ")}]`
+          );
 
-      // Add verified candidates in priority order that have not been attempted yet
-      for (const pref of GEMINI_MODEL_PREFERENCES) {
-        const cleanPref = sanitizeGeminiModelName(pref);
-        if (verifiedModels.includes(cleanPref) && !modelsToTry.includes(cleanPref)) {
-          modelsToTry.push(cleanPref);
-          if (modelsToTry.length >= 3) break; // Limit to 2 fallback models to stay within Vercel time limits
-        }
-      }
-
-      // Fallback to any verified model with "flash" if none of preferred candidates matched
-      if (modelsToTry.length === 1 && verifiedModels.length > 0) {
-        for (const vModel of verifiedModels) {
-          if (!modelsToTry.includes(vModel)) {
-            modelsToTry.push(vModel);
-            if (modelsToTry.length >= 3) break;
+          // Insert verified models that haven't been queued yet
+          for (const vModel of verifiedModels) {
+            const cleanV = sanitizeGeminiModelName(vModel);
+            if (!modelsToTry.includes(cleanV)) {
+              modelsToTry.push(cleanV);
+            }
           }
         }
+      } catch (discoveryErr) {
+        console.warn(`[EcoLens AI] Model discovery request failed, continuing with preconfigured fallback queue.`);
       }
 
-      if (modelsToTry.length > 1) {
-        console.info(
-          `[EcoLens AI] Queued verified fallback models: [${modelsToTry.slice(1).join(", ")}]`
-        );
-      } else {
-        console.warn(`[EcoLens AI] No alternative models available in official Models API.`);
-      }
+      console.info(
+        `[EcoLens AI] Active fallback models remaining in queue: [${modelsToTry.slice(1).join(", ")}]`
+      );
     }
   }
 
@@ -435,7 +457,7 @@ async function callGeminiGenerateContent(
     )}] failed. Final HTTP status: ${lastStatus}. Error details: ${lastErrorText.slice(0, 200)}`
   );
 
-  throw formatGeminiError(lastStatus, lastErrorText, attemptedModels.join(" / "), verifiedModels);
+  throw formatGeminiError(lastStatus, lastErrorText, attemptedModels.join(", "), verifiedModels);
 }
 
 export interface VisionHealthStatus {
@@ -452,13 +474,15 @@ export interface VisionHealthStatus {
   hosted: {
     geminiConfigured: boolean;
     geminiModel: string;
+    fallbackModel: string;
   };
 }
 
 export async function checkVisionHealth(): Promise<VisionHealthStatus> {
   const apiKey = getGeminiApiKey();
   const geminiConfigured = Boolean(apiKey && apiKey.trim() !== "");
-  const defaultGeminiModel = getConfiguredGeminiModel();
+  const defaultGeminiModel = getConfiguredPrimaryModel();
+  const fallbackModel = getConfiguredFallbackModel();
 
   // Check Ollama
   let ollamaOnline = false;
@@ -525,6 +549,7 @@ export async function checkVisionHealth(): Promise<VisionHealthStatus> {
     hosted: {
       geminiConfigured,
       geminiModel: defaultGeminiModel,
+      fallbackModel,
     },
   };
 }
@@ -882,7 +907,7 @@ export async function analyzeImageWithGemma(
   } else if (health.activeProvider === "gemini") {
     // 2. Use Google Gemini Multimodal Vision API
     const apiKey = getGeminiApiKey();
-    const resolvedModel = await resolveGeminiVisionModel(apiKey);
+    const primaryModel = getConfiguredPrimaryModel();
 
     const promptText = municipality
       ? `${SYSTEM_PROMPT}\n\nUser Municipality context: ${municipality}.\nAnalyze this uploaded waste photo and provide structured circular analysis.`
@@ -910,7 +935,7 @@ export async function analyzeImageWithGemma(
 
     const { text, modelUsed } = await callGeminiGenerateContent(
       apiKey,
-      resolvedModel,
+      primaryModel,
       promptText,
       cleanMime,
       imageBase64
