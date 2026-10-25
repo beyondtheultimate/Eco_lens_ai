@@ -2,13 +2,23 @@
   "name": "eco-lens-ai",
   "version": "1.0.0",
   "description": "EcoLens AI - Gemma 4 Circular Waste Intelligence & Optical Material Breakdown",
+  "workspaces": [
+    "ecolens-ai/server",
+    "ecolens-ai/client"
+  ],
   "scripts": {
+    "install:all": "npm --prefix ecolens-ai/server install && npm --prefix ecolens-ai/client install",
+    "prebuild": "npm run install:all",
     "dev": "npm --prefix ecolens-ai/server run dev",
     "dev:client": "npm --prefix ecolens-ai/client run dev",
     "build:server": "npm --prefix ecolens-ai/server run build",
     "build:client": "npm --prefix ecolens-ai/client run build",
-    "build": "npm run build:server && npm run build:client",
+    "build": "npm run build:server && npm run build:client && node -e \"require('fs').cpSync('ecolens-ai/client/dist', 'dist', {recursive: true})\"",
+    "start": "npm --prefix ecolens-ai/server start",
     "test": "npm --prefix ecolens-ai/server test"
+  },
+  "dependencies": {
+    "typescript": "^5.7.3"
   },
   "keywords": [
     "ecolens",
