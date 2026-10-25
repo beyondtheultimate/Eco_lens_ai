@@ -159,6 +159,23 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Upstream high-demand / capacity error (503 Service Unavailable)
+    if (
+      msg.includes("503") ||
+      msg.includes("high demand") ||
+      msg.includes("overloaded") ||
+      msg.includes("Service Unavailable")
+    ) {
+      res.status(503).json({
+        error: "AI_SERVICE_HIGH_DEMAND",
+        message: msg,
+        actionRequired:
+          "Google's Gemini vision models are experiencing temporary peak load across regions. The automatic retry and fallback sequence was attempted. Please wait 10-20 seconds and click 'Run Resource & Analyze' again.",
+        setupUrl: "https://aistudio.google.com/",
+      });
+      return;
+    }
+
     res.status(500).json({
       error: "ANALYSIS_FAILED",
       message: msg,

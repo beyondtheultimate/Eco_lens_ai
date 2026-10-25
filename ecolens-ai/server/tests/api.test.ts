@@ -140,6 +140,17 @@ async function runTests() {
     err429.message.includes("Rate Limit Exceeded"),
     "429 error should mention rate limit exceeded"
   );
+
+  const err503 = formatGeminiError(
+    503,
+    "This model is currently experiencing high demand.",
+    "gemini-3.8-flash",
+    ["gemini-2.5-flash", "gemini-2.0-flash"]
+  );
+  assert.ok(
+    err503.message.includes("503") || err503.message.includes("high demand"),
+    "503 error should mention 503 or high demand"
+  );
   console.log(" [PASS] Gemini error diagnostics formatting verified.");
 
   // 6. Schema Normalization & Tolerance Test

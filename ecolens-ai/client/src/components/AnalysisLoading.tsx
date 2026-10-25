@@ -7,7 +7,7 @@ interface AnalysisLoadingProps {
 
 const STAGES = [
   { text: "Ingesting 2D optical frame and verifying payload...", icon: Search },
-  { text: "Executing Gemma 4 multimodal vision tokenization...", icon: Cpu },
+  { text: "Executing multimodal vision neural tokenization...", icon: Cpu },
   { text: "Querying EPA & Municipal Material Knowledge Base...", icon: CheckCircle2 },
   { text: "Enforcing Zod schema verification & uncertainty bounds...", icon: ShieldCheck },
 ];

@@ -187,18 +187,37 @@ export function formatGeminiError(
   return new Error(`Gemini Vision API error (HTTP ${status}): ${parsedMsg}`);
 }
 
+interface GeminiAttemptResult {
+  ok: boolean;
+  status: number;
+  data?: {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+  };
+  errorText?: string;
+  isTransient?: boolean;
+}
+
 /**
- * Executes a Gemini generateContent call, with a sensible 45-second timeout
- * and automatic dynamic recovery if HTTP 404 is encountered.
+ * Dispatches a single HTTP request to Google Gemini generateContent with strict timeout and clean logging.
  */
-async function callGeminiGenerateContent(
+async function executeSingleGeminiRequest(
   apiKey: string,
-  initialModel: string,
+  model: string,
   promptText: string,
   cleanMime: string,
-  imageBase64: string
-): Promise<{ text: string; modelUsed: string }> {
-  const cleanModel = sanitizeGeminiModelName(initialModel);
+  imageBase64: string,
+  attemptIndex: number,
+  maxRetries: number
+): Promise<GeminiAttemptResult> {
+  const cleanModel = sanitizeGeminiModelName(model);
+  const primaryUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    cleanModel
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
   const payload = {
     contents: [
       {
@@ -219,96 +238,204 @@ async function callGeminiGenerateContent(
     },
   };
 
-  const primaryUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    cleanModel
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const startTime = Date.now();
+  console.log(
+    `[EcoLens AI] [Attempt ${attemptIndex + 1}/${maxRetries + 1}] Invoking Gemini model '${cleanModel}'...`
+  );
 
-  let response: Response;
   try {
-    response = await fetch(primaryUrl, {
+    const response = await fetch(primaryUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(45000), // 45 seconds coordinated with Vercel's 60s maxDuration
+      signal: AbortSignal.timeout(25000), // 25s per single attempt to respect Vercel's 60s limit
     });
-  } catch (fetchErr) {
-    const netErr = fetchErr as Error;
-    if (netErr.name === "TimeoutError" || netErr.message?.toLowerCase().includes("timeout") || netErr.message?.toLowerCase().includes("aborted")) {
-      throw new Error(
-        `MULTIMODAL_INFERENCE_TIMEOUT: Google Gemini API (${cleanModel}) did not complete vision generation within 45 seconds. The image may be too large or the API endpoint is experiencing latency.`
-      );
+
+    const elapsed = Date.now() - startTime;
+
+    if (response.ok) {
+      console.log(`[EcoLens AI] Model '${cleanModel}' responded successfully (HTTP 200) in ${elapsed}ms.`);
+      const data = (await response.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      };
+      return { ok: true, status: 200, data };
     }
-    throw new Error(`Gemini connection error: ${netErr.message}`);
+
+    const errorText = await response.text();
+    const isTransient =
+      [503, 429, 500, 502, 504].includes(response.status) ||
+      errorText.toLowerCase().includes("high demand") ||
+      errorText.toLowerCase().includes("overloaded");
+
+    console.warn(
+      `[EcoLens AI] Model '${cleanModel}' returned HTTP ${response.status} in ${elapsed}ms (${
+        isTransient ? "transient / high-demand" : "client-error"
+      }): ${errorText.slice(0, 180)}`
+    );
+
+    return {
+      ok: false,
+      status: response.status,
+      errorText,
+      isTransient,
+    };
+  } catch (err) {
+    const netErr = err as Error;
+    const elapsed = Date.now() - startTime;
+    const isTimeout =
+      netErr.name === "TimeoutError" ||
+      netErr.message?.toLowerCase().includes("timeout") ||
+      netErr.message?.toLowerCase().includes("aborted");
+
+    console.warn(
+      `[EcoLens AI] Model '${cleanModel}' fetch failed in ${elapsed}ms: ${netErr.message}`
+    );
+
+    return {
+      ok: false,
+      status: isTimeout ? 504 : 500,
+      errorText: netErr.message,
+      isTransient: true,
+    };
   }
+}
 
-  if (!response.ok) {
-    const errText = await response.text();
+/**
+ * Executes vision generation with maximum 2 retries for transient HTTP 503/500/429 errors
+ * using exponential backoff with jitter, and automatic fallback to verified alternative models
+ * from the official Models API if the primary model remains overloaded or unavailable.
+ */
+async function callGeminiGenerateContent(
+  apiKey: string,
+  initialModel: string,
+  promptText: string,
+  cleanMime: string,
+  imageBase64: string
+): Promise<{ text: string; modelUsed: string }> {
+  const primaryModel = sanitizeGeminiModelName(initialModel);
+  const modelsToTry: string[] = [primaryModel];
+  const attemptedModels: string[] = [];
+  const maxRetriesPerModel = 2; // Up to 2 retries for transient errors (total 3 attempts per model)
 
-    // If 404 Model Not Found, dynamically discover available models and retry once
-    if (response.status === 404) {
-      console.warn(
-        `[EcoLens AI] Model '${cleanModel}' returned 404. Attempting automatic model discovery fallback...`
+  let lastStatus = 500;
+  let lastErrorText = "Unknown error";
+
+  // Outer loop: Try models (primary model first, then fallback models if primary persistently returns 503 or 404)
+  for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
+    const currentModel = modelsToTry[mIdx];
+    attemptedModels.push(currentModel);
+
+    let isModelExhausted = false;
+
+    // Inner loop: Retries for transient HTTP 503/500/429 errors using exponential backoff with jitter
+    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
+      const result = await executeSingleGeminiRequest(
+        apiKey,
+        currentModel,
+        promptText,
+        cleanMime,
+        imageBase64,
+        attempt,
+        maxRetriesPerModel
       );
-      const freshModels = await fetchAvailableGeminiModels(apiKey, true);
-      const fallbackModel =
-        freshModels.find((m) => m !== cleanModel && GEMINI_MODEL_PREFERENCES.includes(m)) ||
-        freshModels.find((m) => m !== cleanModel);
 
-      if (fallbackModel) {
-        console.info(
-          `[EcoLens AI] Retrying waste analysis using discovered fallback model: '${fallbackModel}'...`
-        );
-        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          fallbackModel
-        )}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-        let retryRes: Response;
-        try {
-          retryRes = await fetch(fallbackUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(45000),
-          });
-        } catch (retryErr) {
-          const netErr = retryErr as Error;
-          if (netErr.name === "TimeoutError" || netErr.message?.toLowerCase().includes("timeout") || netErr.message?.toLowerCase().includes("aborted")) {
-            throw new Error(
-              `MULTIMODAL_INFERENCE_TIMEOUT: Gemini fallback model (${fallbackModel}) timed out after 45 seconds.`
-            );
-          }
-          throw retryErr;
+      if (result.ok && result.data) {
+        const text = result.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (text && text.trim().length > 0) {
+          console.log(`[EcoLens AI] Vision analysis completed successfully using '${currentModel}'.`);
+          return { text, modelUsed: currentModel };
         }
-
-        if (retryRes.ok) {
-          const retryData = (await retryRes.json()) as {
-            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-          };
-          const retryText = retryData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          return { text: retryText, modelUsed: fallbackModel };
-        }
-
-        const retryErrText = await retryRes.text();
-        throw formatGeminiError(retryRes.status, retryErrText, fallbackModel, freshModels);
       }
 
-      throw formatGeminiError(404, errText, cleanModel, freshModels);
+      lastStatus = result.status;
+      lastErrorText = result.errorText || "Empty response from Gemini API";
+
+      // Non-transient client errors (400, 401, 403) must NOT be retried
+      if (lastStatus === 400 || lastStatus === 401 || lastStatus === 403) {
+        console.error(
+          `[EcoLens AI] Non-retryable error (HTTP ${lastStatus}) encountered on '${currentModel}'. Aborting retries.`
+        );
+        throw formatGeminiError(lastStatus, lastErrorText, currentModel, []);
+      }
+
+      // If 404 Model Not Found, do not retry this model; break to fallback immediately
+      if (lastStatus === 404) {
+        console.warn(
+          `[EcoLens AI] Model '${currentModel}' not found (HTTP 404). Transitioning to fallback models.`
+        );
+        isModelExhausted = true;
+        break;
+      }
+
+      // If transient error (503 High Demand, 429 Rate Limit, 500 Server Error) and retries remain:
+      if (result.isTransient && attempt < maxRetriesPerModel) {
+        // Exponential backoff with random jitter: ~1.0s - 1.4s (attempt 0), ~2.0s - 2.4s (attempt 1)
+        const jitter = Math.floor(Math.random() * 400);
+        const backoffMs = Math.min(1000 * Math.pow(2, attempt) + jitter, 2500);
+
+        console.info(
+          `[EcoLens AI] Transient HTTP ${lastStatus} on '${currentModel}'. Backing off ${backoffMs}ms before retry ${
+            attempt + 1
+          }/${maxRetriesPerModel}...`
+        );
+        await new Promise((r) => setTimeout(r, backoffMs));
+      } else {
+        isModelExhausted = true;
+        break;
+      }
     }
 
-    const available = await fetchAvailableGeminiModels(apiKey);
-    throw formatGeminiError(response.status, errText, cleanModel, available);
+    // If current model persistently failed (e.g. 503 high demand after 2 retries, or 404) and no fallbacks queued yet:
+    if (isModelExhausted && mIdx === 0) {
+      console.warn(
+        `[EcoLens AI] Primary model '${currentModel}' is unavailable (HTTP ${lastStatus}). Querying official Models API to discover verified fallback models...`
+      );
+
+      const verifiedModels = await fetchAvailableGeminiModels(apiKey, true);
+      console.log(
+        `[EcoLens AI] Official Models API returned ${verifiedModels.length} models supporting generateContent: [${verifiedModels.join(
+          ", "
+        )}]`
+      );
+
+      // Add verified candidates in priority order that have not been attempted yet
+      for (const pref of GEMINI_MODEL_PREFERENCES) {
+        const cleanPref = sanitizeGeminiModelName(pref);
+        if (verifiedModels.includes(cleanPref) && !modelsToTry.includes(cleanPref)) {
+          modelsToTry.push(cleanPref);
+          if (modelsToTry.length >= 3) break; // Limit to 2 fallback models to stay within Vercel time limits
+        }
+      }
+
+      // Fallback to any verified model with "flash" if none of preferred candidates matched
+      if (modelsToTry.length === 1 && verifiedModels.length > 0) {
+        for (const vModel of verifiedModels) {
+          if (!modelsToTry.includes(vModel)) {
+            modelsToTry.push(vModel);
+            if (modelsToTry.length >= 3) break;
+          }
+        }
+      }
+
+      if (modelsToTry.length > 1) {
+        console.info(
+          `[EcoLens AI] Queued verified fallback models: [${modelsToTry.slice(1).join(", ")}]`
+        );
+      } else {
+        console.warn(`[EcoLens AI] No alternative models available in official Models API.`);
+      }
+    }
   }
 
-  const geminiData = (await response.json()) as {
-    candidates?: Array<{
-      content?: {
-        parts?: Array<{ text?: string }>;
-      };
-    }>;
-  };
+  // All attempted models and retries failed
+  const verifiedModels = await fetchAvailableGeminiModels(apiKey);
+  console.error(
+    `[EcoLens AI] All attempted models [${attemptedModels.join(
+      ", "
+    )}] failed. Final HTTP status: ${lastStatus}. Error details: ${lastErrorText.slice(0, 200)}`
+  );
 
-  const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return { text, modelUsed: cleanModel };
+  throw formatGeminiError(lastStatus, lastErrorText, attemptedModels.join(" / "), verifiedModels);
 }
 
 export interface VisionHealthStatus {
