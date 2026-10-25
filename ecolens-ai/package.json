@@ -1,0 +1,16 @@
+{
+  "name": "ecolens-ai",
+  "version": "1.0.0",
+  "description": "EcoLens AI - Gemma 4 Waste Analysis & Circular Intelligence",
+  "scripts": {
+    "dev": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build:server": "npm --prefix server run build",
+    "build:client": "npm --prefix client run build",
+    "build": "npm run build:server && npm run build:client",
+    "test": "npm --prefix server test"
+  },
+  "keywords": ["ecolens", "gemma4", "mlh-hackathon", "circular-economy"],
+  "author": "EcoLens AI Team",
+  "license": "MIT"
+}
