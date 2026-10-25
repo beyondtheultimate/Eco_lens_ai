@@ -10,6 +10,8 @@ import {
   TrendingDown,
   Info,
   RotateCcw,
+  Download,
+  Share2,
 } from "lucide-react";
 import type { WasteAnalysisResult } from "../types";
 
@@ -30,6 +32,24 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
     low: "bg-rose-500/10 text-rose-400 border-rose-500/30",
   };
 
+  const handleExportJson = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(result, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute(
+      "download",
+      `ecolens-${result.itemName.toLowerCase().replace(/[^a-z0-9]/g, "-")}-audit.json`
+    );
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Calculate circularity index
+  const recyclablePercent = result.materials
+    .filter((m) => m.recyclable)
+    .reduce((acc, curr) => acc + curr.percentage, 0);
+
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
       {/* Top Action Bar */}
@@ -43,12 +63,21 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
             {new Date(result.analyzedAt).toLocaleTimeString()}
           </span>
         </div>
-        <button
-          onClick={onReset}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-medium transition-all"
-        >
-          <RotateCcw className="h-3.5 w-3.5 text-cyan-400" /> Analyze Another Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExportJson}
+            title="Download JSON audit report"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-medium transition-all"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-400" /> Export JSON
+          </button>
+          <button
+            onClick={onReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-medium transition-all"
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-cyan-400" /> Analyze Another Item
+          </button>
+        </div>
       </div>
 
       {/* Hero Header Card */}
@@ -91,10 +120,14 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
             </p>
 
             {/* Environmental Abatement Stat */}
-            <div className="pt-2 flex items-center gap-3">
+            <div className="pt-2 flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
                 <TrendingDown className="h-4 w-4 text-emerald-400" />
                 ~{result.estimatedCarbonSavedKg.toFixed(2)} kg CO₂e Abated if Recycled
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 text-xs font-semibold">
+                <Share2 className="h-4 w-4 text-cyan-400" />
+                Circularity Index: {recyclablePercent}% Recyclable
               </div>
             </div>
           </div>

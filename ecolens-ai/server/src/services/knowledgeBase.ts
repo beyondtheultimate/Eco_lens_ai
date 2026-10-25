@@ -333,6 +333,129 @@ export const RECYCLING_KNOWLEDGE_BASE: KnowledgeEntry[] = [
       },
     ],
   },
+  {
+    category: "Mixed / Landfill",
+    keywords: [
+      "styrofoam",
+      "polystyrene",
+      "foam",
+      "takeout",
+      "peanut",
+      "packing peanut",
+      "eps",
+      "cup",
+      "insulation",
+    ],
+    primaryMaterial: "Expanded Polystyrene (EPS #6)",
+    defaultRecyclable: false,
+    standardDisposal: [
+      "DO NOT place in curbside recycling bins in most municipalities.",
+      "Break down large molded foam packaging pieces to fit into general waste trash bins.",
+      "Search for specialized drop-off densification programs at local packing stores.",
+    ],
+    contaminationWarnings: [
+      "Polystyrene breaks into millions of static microplastic beads that contaminate glass and paper streams in sorting facilities.",
+    ],
+    defaultReuseIdeas: [
+      "Use clean foam packaging blocks as lightweight drainage filler at the bottom of large potted plants.",
+      "Save packing peanuts in a bag for shipping fragile gifts or delicate holiday ornaments.",
+      "Carve rigid foam blocks into durable craft stamps, floral arranging bases, or model terrain.",
+    ],
+    averageCo2SavedKg: 0.05,
+    citations: [
+      {
+        source: "EPS Industry Alliance",
+        title: "EPS Recycling Report and Collection Locator",
+        url: "https://www.epsrecycling.org/",
+        guidelineSnippet: "Expanded polystyrene is 98% air, making curbside transport economically unviable without dedicated compactor drop-off sites.",
+      },
+      {
+        source: "Earth911",
+        title: "How to Recycle Polystyrene & Packing Peanuts",
+        url: "https://earth911.com/recycling-guide/how-to-recycle-polystyrene/",
+        guidelineSnippet: "Standard municipal MRFs discard foam #6 to landfills. Specialized drop-off sites melt and densify EPS into architectural mouldings.",
+      },
+    ],
+  },
+  {
+    category: "Plastics",
+    keywords: [
+      "tetra",
+      "carton",
+      "aseptic",
+      "juice box",
+      "milk carton",
+      "broth",
+      "almond milk",
+      "gable top",
+    ],
+    primaryMaterial: "Aseptic Composite (74% Paper, 22% Polyethylene, 4% Aluminum)",
+    defaultRecyclable: true,
+    standardDisposal: [
+      "Empty remaining liquids completely.",
+      "Do NOT flatten cartons if your local facility uses optical sorting (3D shape helps infrared scanners).",
+      "Keep caps screwed on to prevent loose plastic litter.",
+      "Place in curbside mixed recycling bin if your community participates in the Carton Council program.",
+    ],
+    contaminationWarnings: [
+      "Straws and plastic tear-away seals must be tucked inside or discarded to avoid littering.",
+    ],
+    defaultReuseIdeas: [
+      "Rinse and cut top off to make water-resistant seed starter pots for your garden.",
+      "Use sturdy cartons to freeze portions of homemade soup, sauce, or compostable scraps.",
+      "Upcycle into waterproof bird feeding stations by cutting feeding ports into the sides.",
+    ],
+    averageCo2SavedKg: 0.18,
+    citations: [
+      {
+        source: "Carton Council of North America",
+        title: "Carton Recycling Directives & Facility Availability",
+        url: "https://www.recyclecartons.com/",
+        guidelineSnippet: "Over 60% of US households have access to carton recycling. Hydro-pulpers separate high-grade paper fibers from poly-aluminum linings.",
+      },
+    ],
+  },
+  {
+    category: "Textiles",
+    keywords: [
+      "shirt",
+      "cloth",
+      "textile",
+      "fabric",
+      "cotton",
+      "polyester",
+      "jeans",
+      "sock",
+      "garment",
+      "clothing",
+      "wool",
+      "rag",
+    ],
+    primaryMaterial: "Natural / Synthetic Textile Blend",
+    defaultRecyclable: false,
+    standardDisposal: [
+      "Never put textiles in standard curbside single-stream recycling bins (clothing wraps around sorting axles).",
+      "Donate clean, wearable clothing to local thrift stores or community clothing drives.",
+      "Torn or unwearable textiles should be taken to dedicated textile recycling collection boxes for mechanical shredding into insulation.",
+    ],
+    contaminationWarnings: [
+      "Mildew or dampness ruins entire textile bales; ensure items are 100% clean and dry before donation.",
+    ],
+    defaultReuseIdeas: [
+      "Cut worn cotton shirts and flannel into reusable washable cleaning rags to replace single-use paper towels.",
+      "Braid old fabric strips into durable pet chew toys or decorative braided floor mats.",
+      "Use scraps as protective wrap for storing fragile glassware or packing moving boxes.",
+    ],
+    averageCo2SavedKg: 0.85,
+    citations: [
+      {
+        source: "Council for Textile Recycling (SMART)",
+        title: "Secondary Materials and Recycled Textiles Association Guidelines",
+        url: "https://www.smartasn.org/",
+        guidelineSnippet: "Nearly 85% of post-consumer textile waste ends up in landfills despite 95% being completely rewearable or recyclable into soundproofing insulation.",
+      },
+    ],
+  },
 ];
 
 /**

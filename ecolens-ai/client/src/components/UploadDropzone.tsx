@@ -215,6 +215,22 @@ export const UploadDropzone: React.FC<UploadDropzoneProps> = ({
           >
             🔌 E-Waste Cable
           </button>
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleSampleSelect("Tetra Pak Juice Carton", "Plastics")}
+            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-all hover:border-purple-500/40 hover:text-purple-300"
+          >
+            🧃 Juice Box
+          </button>
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleSampleSelect("Styrofoam Takeout Box", "Mixed / Landfill")}
+            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition-all hover:border-rose-500/40 hover:text-rose-300"
+          >
+            ☕ Styrofoam
+          </button>
         </div>
       </div>
     </div>
