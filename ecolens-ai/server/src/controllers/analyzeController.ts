@@ -101,6 +101,46 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Gemini authentication error (400 or 403)
+    if (msg.includes("Authentication Failed") || msg.includes("API key")) {
+      res.status(401).json({
+        error: "GEMINI_AUTH_FAILED",
+        message: msg,
+        actionRequired:
+          "Configure a valid GEMINI_API_KEY in Vercel Project Settings > Environment Variables (https://aistudio.google.com/apikey).",
+        setupUrl: "https://aistudio.google.com/apikey",
+      });
+      return;
+    }
+
+    // Gemini rate limit or quota exceeded (429)
+    if (
+      msg.includes("Rate Limit Exceeded") ||
+      msg.includes("RESOURCE_EXHAUSTED") ||
+      msg.includes("429")
+    ) {
+      res.status(429).json({
+        error: "RATE_LIMIT_EXCEEDED",
+        message: msg,
+        actionRequired:
+          "Gemini free tier per-minute quota reached. Please wait 15-30 seconds before analyzing another image.",
+        setupUrl: "https://aistudio.google.com/",
+      });
+      return;
+    }
+
+    // Gemini model not found (404)
+    if (msg.includes("Model Not Found") || msg.includes("not found for API version v1beta")) {
+      res.status(404).json({
+        error: "GEMINI_MODEL_NOT_FOUND",
+        message: msg,
+        actionRequired:
+          "Set GEMINI_MODEL in Vercel Environment Variables to a model supported by your key (e.g. gemini-3.8-flash, gemini-2.5-flash, gemini-2.0-flash).",
+        setupUrl: "https://aistudio.google.com/apikey",
+      });
+      return;
+    }
+
     res.status(500).json({
       error: "ANALYSIS_FAILED",
       message: msg,

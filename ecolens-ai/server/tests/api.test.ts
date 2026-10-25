@@ -66,6 +66,82 @@ async function runTests() {
   assert.equal(invalidParse.success, false, "Schema must reject fewer than 3 reuse suggestions");
   console.log(" [PASS] Zod schema correctly rejected malformed payload.");
 
+  // 4. Gemini Model Sanitization and Defaults Test
+  console.log("Test 4: Gemini Model Sanitization & Default Model...");
+  const {
+    sanitizeGeminiModelName,
+    DEFAULT_GEMINI_MODEL,
+    formatGeminiError,
+    GEMINI_MODEL_PREFERENCES,
+  } = await import("../src/services/ollamaService.js");
+
+  assert.equal(DEFAULT_GEMINI_MODEL, "gemini-3.8-flash", "Default model must be gemini-3.8-flash");
+  assert.equal(
+    sanitizeGeminiModelName("models/gemini-3.8-flash"),
+    "gemini-3.8-flash",
+    "Should strip leading 'models/' prefix"
+  );
+  assert.equal(
+    sanitizeGeminiModelName("models/gemini-1.5-flash"),
+    "gemini-1.5-flash",
+    "Should strip leading 'models/' prefix from older models"
+  );
+  assert.equal(
+    sanitizeGeminiModelName("  gemini-2.0-flash  "),
+    "gemini-2.0-flash",
+    "Should trim whitespace"
+  );
+  assert.equal(
+    sanitizeGeminiModelName(""),
+    "gemini-3.8-flash",
+    "Empty model should default to gemini-3.8-flash"
+  );
+  assert.ok(
+    GEMINI_MODEL_PREFERENCES.includes("gemini-3.8-flash"),
+    "Preferences should include gemini-3.8-flash"
+  );
+  console.log(" [PASS] Gemini model sanitization and preferences verified.");
+
+  // 5. Gemini Error Diagnostics Formatting Test
+  console.log("Test 5: Gemini Error Diagnostics Formatting...");
+  const err404 = formatGeminiError(
+    404,
+    JSON.stringify({ error: { message: "models/gemini-1.5-flash is not found for API version v1beta" } }),
+    "gemini-1.5-flash",
+    ["gemini-3.8-flash", "gemini-2.0-flash"]
+  );
+  assert.ok(
+    err404.message.includes("gemini-3.8-flash"),
+    "404 error should report available candidate models"
+  );
+  assert.ok(
+    err404.message.includes("HTTP 404"),
+    "404 error should include HTTP status code"
+  );
+
+  const err403 = formatGeminiError(
+    403,
+    JSON.stringify({ error: { message: "API_KEY_INVALID" } }),
+    "gemini-3.8-flash",
+    []
+  );
+  assert.ok(
+    err403.message.includes("aistudio.google.com/apikey"),
+    "403 error should link to Google AI Studio"
+  );
+
+  const err429 = formatGeminiError(
+    429,
+    JSON.stringify({ error: { message: "RESOURCE_EXHAUSTED" } }),
+    "gemini-3.8-flash",
+    []
+  );
+  assert.ok(
+    err429.message.includes("Rate Limit Exceeded"),
+    "429 error should mention rate limit exceeded"
+  );
+  console.log(" [PASS] Gemini error diagnostics formatting verified.");
+
   console.log("=== ALL BACKEND UNIT TESTS PASSED ===");
 }
 

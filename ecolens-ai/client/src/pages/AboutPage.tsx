@@ -110,7 +110,7 @@ export const AboutPage: React.FC = () => {
             </li>
             <li className="flex items-start gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 mt-1.5 shrink-0"></span>
-              <span><strong>Cloud Serverless Inference (Google Gemini Vision):</strong> When deployed on Vercel (where localhost cannot be reached), uses Google Gemini 1.5 Flash multimodal vision via <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">GEMINI_API_KEY</code>. Free API keys can be generated at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-cyan-400 underline">aistudio.google.com/apikey</a>.</span>
+              <span><strong>Cloud Serverless Inference (Google Gemini Vision):</strong> When deployed on Vercel (where localhost cannot be reached), uses Google Gemini multimodal vision (defaulting to <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">gemini-3.8-flash</code> with automatic model discovery and fallback) via <code className="bg-slate-950 px-1 py-0.5 rounded font-mono text-cyan-300">GEMINI_API_KEY</code>. Free API keys can be generated at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="text-cyan-400 underline">aistudio.google.com/apikey</a>.</span>
             </li>
           </ul>
 

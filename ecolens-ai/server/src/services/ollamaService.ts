@@ -8,8 +8,295 @@ import { queryKnowledgeBase } from "./knowledgeBase.js";
 
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const TARGET_MODEL = process.env.OLLAMA_MODEL || "gemma4:e2b";
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+
+export function getGeminiApiKey(): string {
+  return (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+}
+
+/**
+ * Normalizes model names by stripping any accidental "models/" prefix or whitespace.
+ * e.g. "models/gemini-3.8-flash" -> "gemini-3.8-flash"
+ */
+export function sanitizeGeminiModelName(modelName?: string): string {
+  if (!modelName || !modelName.trim()) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return modelName.trim().replace(/^models\//i, "");
+}
+
+/**
+ * Returns the sanitized Gemini model identifier configured in environment variables.
+ */
+export function getConfiguredGeminiModel(): string {
+  return sanitizeGeminiModelName(process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL);
+}
+
+/**
+ * Prioritized list of vision-capable Gemini models supporting generateContent.
+ */
+export const GEMINI_MODEL_PREFERENCES: readonly string[] = [
+  "gemini-3.8-flash",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+];
+
+interface CachedModelList {
+  models: string[];
+  timestamp: number;
+}
+let cachedModels: CachedModelList | null = null;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Queries the official Gemini API model-list endpoint:
+ * GET https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}
+ * Filters for models supporting the 'generateContent' method.
+ */
+export async function fetchAvailableGeminiModels(
+  apiKey: string,
+  forceFresh: boolean = false
+): Promise<string[]> {
+  if (!apiKey || apiKey.trim() === "") return [];
+
+  if (!forceFresh && cachedModels && Date.now() - cachedModels.timestamp < CACHE_TTL_MS) {
+    return cachedModels.models;
+  }
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[EcoLens AI] Gemini list-models returned HTTP ${res.status}: ${errText.slice(0, 150)}`);
+      return cachedModels ? cachedModels.models : [];
+    }
+
+    const data = (await res.json()) as {
+      models?: Array<{
+        name: string;
+        supportedGenerationMethods?: string[];
+      }>;
+    };
+
+    const validModels = (data.models || [])
+      .filter(
+        (m) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes("generateContent")
+      )
+      .map((m) => sanitizeGeminiModelName(m.name));
+
+    if (validModels.length > 0) {
+      cachedModels = {
+        models: validModels,
+        timestamp: Date.now(),
+      };
+      return validModels;
+    }
+  } catch (err) {
+    console.warn(`[EcoLens AI] Gemini model discovery request failed: ${(err as Error).message}`);
+  }
+
+  return cachedModels ? cachedModels.models : [];
+}
+
+/**
+ * Resolves the optimal vision model to use:
+ * 1. If explicit env GEMINI_MODEL is set, validates against available models.
+ * 2. Matches against prioritized list (gemini-3.8-flash, gemini-2.5-flash, gemini-2.0-flash, etc.).
+ * 3. Falls back to any available model with 'flash' in its name.
+ * 4. Defaults to sanitized GEMINI_MODEL or gemini-3.8-flash.
+ */
+export async function resolveGeminiVisionModel(apiKey: string): Promise<string> {
+  const envModel = process.env.GEMINI_MODEL ? sanitizeGeminiModelName(process.env.GEMINI_MODEL) : null;
+  const available = await fetchAvailableGeminiModels(apiKey);
+
+  if (available.length > 0) {
+    // If user specified GEMINI_MODEL explicitly and it is valid for this key, use it
+    if (envModel && available.includes(envModel)) {
+      return envModel;
+    }
+
+    // Check prioritized candidates
+    for (const candidate of GEMINI_MODEL_PREFERENCES) {
+      if (available.includes(candidate)) {
+        return candidate;
+      }
+    }
+
+    // Try finding any flash model
+    const anyFlash = available.find((m) => m.toLowerCase().includes("flash"));
+    if (anyFlash) return anyFlash;
+
+    // Use first available model supporting generateContent
+    return available[0];
+  }
+
+  return envModel || DEFAULT_GEMINI_MODEL;
+}
+
+/**
+ * Formats a clean, user-actionable error for Gemini API failures.
+ */
+export function formatGeminiError(
+  status: number,
+  errorText: string,
+  attemptedModel: string,
+  availableModels: string[] = []
+): Error {
+  let parsedMsg = errorText;
+  try {
+    const json = JSON.parse(errorText) as { error?: { message?: string; status?: string } };
+    if (json.error?.message) {
+      parsedMsg = json.error.message;
+    }
+  } catch {
+    // keep raw text
+  }
+
+  if (status === 400 || status === 403) {
+    if (
+      parsedMsg.toLowerCase().includes("api_key") ||
+      parsedMsg.toLowerCase().includes("api key") ||
+      parsedMsg.toLowerCase().includes("credential") ||
+      status === 403
+    ) {
+      return new Error(
+        `Gemini API Authentication Failed (HTTP ${status}): ${parsedMsg}. Please create or verify your API key at https://aistudio.google.com/apikey and set GEMINI_API_KEY in your server/Vercel environment variables.`
+      );
+    }
+    return new Error(`Gemini API Request Error (HTTP ${status}): ${parsedMsg}`);
+  }
+
+  if (status === 429) {
+    return new Error(
+      `Gemini Rate Limit Exceeded (HTTP 429 / RESOURCE_EXHAUSTED): Free-tier per-minute quota has been reached. Please wait 15-30 seconds before retrying. Manage quotas at https://aistudio.google.com/`
+    );
+  }
+
+  if (status === 404) {
+    const listMsg =
+      availableModels.length > 0
+        ? `Available models for your key: [${availableModels.join(", ")}]. Set GEMINI_MODEL to one of these IDs in Vercel settings.`
+        : "Verify your project has access to Generative Language models at https://aistudio.google.com/apikey";
+    return new Error(
+      `Gemini Vision API Model Not Found (HTTP 404): Model '${attemptedModel}' is not supported for generateContent on API v1beta. ${listMsg} (Details: ${parsedMsg})`
+    );
+  }
+
+  return new Error(`Gemini Vision API error (HTTP ${status}): ${parsedMsg}`);
+}
+
+/**
+ * Executes a Gemini generateContent call, with automatic dynamic recovery if HTTP 404 is encountered.
+ */
+async function callGeminiGenerateContent(
+  apiKey: string,
+  initialModel: string,
+  promptText: string,
+  cleanMime: string,
+  imageBase64: string
+): Promise<{ text: string; modelUsed: string }> {
+  const cleanModel = sanitizeGeminiModelName(initialModel);
+  const payload = {
+    contents: [
+      {
+        parts: [
+          { text: promptText },
+          {
+            inline_data: {
+              mime_type: cleanMime,
+              data: imageBase64,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      response_mime_type: "application/json",
+      temperature: 0.2,
+    },
+  };
+
+  const primaryUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+    cleanModel
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const response = await fetch(primaryUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(60000),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+
+    // If 404 Model Not Found, dynamically discover available models and retry once
+    if (response.status === 404) {
+      console.warn(
+        `[EcoLens AI] Model '${cleanModel}' returned 404. Attempting automatic model discovery fallback...`
+      );
+      const freshModels = await fetchAvailableGeminiModels(apiKey, true);
+      const fallbackModel =
+        freshModels.find((m) => m !== cleanModel && GEMINI_MODEL_PREFERENCES.includes(m)) ||
+        freshModels.find((m) => m !== cleanModel);
+
+      if (fallbackModel) {
+        console.info(
+          `[EcoLens AI] Retrying waste analysis using discovered fallback model: '${fallbackModel}'...`
+        );
+        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+          fallbackModel
+        )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+        const retryRes = await fetch(fallbackUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(60000),
+        });
+
+        if (retryRes.ok) {
+          const retryData = (await retryRes.json()) as {
+            candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+          };
+          const retryText = retryData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          return { text: retryText, modelUsed: fallbackModel };
+        }
+
+        const retryErrText = await retryRes.text();
+        throw formatGeminiError(retryRes.status, retryErrText, fallbackModel, freshModels);
+      }
+
+      throw formatGeminiError(404, errText, cleanModel, freshModels);
+    }
+
+    const available = await fetchAvailableGeminiModels(apiKey);
+    throw formatGeminiError(response.status, errText, cleanModel, available);
+  }
+
+  const geminiData = (await response.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string }>;
+      };
+    }>;
+  };
+
+  const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return { text, modelUsed: cleanModel };
+}
 
 export interface VisionHealthStatus {
   isReady: boolean;
@@ -29,7 +316,9 @@ export interface VisionHealthStatus {
 }
 
 export async function checkVisionHealth(): Promise<VisionHealthStatus> {
-  const geminiConfigured = Boolean(GEMINI_API_KEY && GEMINI_API_KEY.trim() !== "");
+  const apiKey = getGeminiApiKey();
+  const geminiConfigured = Boolean(apiKey && apiKey.trim() !== "");
+  const defaultGeminiModel = getConfiguredGeminiModel();
 
   // Check Ollama
   let ollamaOnline = false;
@@ -67,7 +356,7 @@ export async function checkVisionHealth(): Promise<VisionHealthStatus> {
     activeModel = TARGET_MODEL;
   } else if (geminiConfigured) {
     activeProvider = "gemini";
-    activeModel = GEMINI_MODEL;
+    activeModel = defaultGeminiModel;
   } else if (ollamaOnline) {
     activeModel = `${TARGET_MODEL} (Not pulled)`;
   }
@@ -85,7 +374,7 @@ export async function checkVisionHealth(): Promise<VisionHealthStatus> {
     },
     hosted: {
       geminiConfigured,
-      geminiModel: GEMINI_MODEL,
+      geminiModel: defaultGeminiModel,
     },
   };
 }
@@ -173,7 +462,7 @@ You MUST respond strictly in valid JSON matching this schema:
 }`;
 
 /**
- * Execute vision inference using either local Ollama or hosted Gemini
+ * Execute vision inference using either local Ollama (Gemma) or hosted Google Gemini Multimodal Vision.
  */
 export async function analyzeImageWithGemma(
   imageBase64: string,
@@ -186,9 +475,9 @@ export async function analyzeImageWithGemma(
   if (!health.isReady) {
     if (health.ollama.isOnline) {
       throw new Error(
-        `Ollama is online at ${health.ollama.ollamaHost}, but model '${health.ollama.targetModel}' has not been pulled. Currently installed models: [${health.ollama.installedModels.join(
-          ", "
-        ) || "none"}]. Please run 'ollama pull ${health.ollama.targetModel}' locally, or configure GEMINI_API_KEY in environment variables for hosted cloud inference.`
+        `Ollama is online at ${health.ollama.ollamaHost}, but model '${health.ollama.targetModel}' has not been pulled. Currently installed models: [${
+          health.ollama.installedModels.join(", ") || "none"
+        }]. Please run 'ollama pull ${health.ollama.targetModel}' locally, or configure GEMINI_API_KEY in environment variables for hosted cloud inference.`
       );
     }
 
@@ -200,7 +489,7 @@ export async function analyzeImageWithGemma(
   let rawJsonText = "";
   let modelIdentifier = "";
 
-  // 1. If Ollama has the model installed, prioritize local Ollama
+  // 1. If Ollama has the target model installed, prioritize local Ollama
   if (health.activeProvider === "ollama") {
     modelIdentifier = `${TARGET_MODEL} (Ollama Local)`;
 
@@ -249,63 +538,43 @@ export async function analyzeImageWithGemma(
     rawJsonText = responseJson.message?.content || "";
   } else if (health.activeProvider === "gemini") {
     // 2. Use Google Gemini Multimodal Vision API
-    modelIdentifier = `${GEMINI_MODEL} (Google Hosted Vision)`;
+    const apiKey = getGeminiApiKey();
+    const resolvedModel = await resolveGeminiVisionModel(apiKey);
 
     const promptText = municipality
       ? `${SYSTEM_PROMPT}\n\nUser Municipality context: ${municipality}.\nAnalyze this uploaded waste photo and provide structured circular analysis.`
       : `${SYSTEM_PROMPT}\n\nAnalyze this uploaded waste photo and provide structured circular analysis.`;
 
     // Standardize MIME type for Gemini
-    let cleanMime = mimeType.toLowerCase();
-    if (cleanMime === "image/jfif" || cleanMime === "image/pjpeg" || cleanMime === "application/octet-stream") {
+    let cleanMime = (mimeType || "").toLowerCase().trim();
+    if (
+      cleanMime === "image/jfif" ||
+      cleanMime === "image/pjpeg" ||
+      cleanMime === "image/jpg" ||
+      cleanMime === "application/octet-stream" ||
+      fileName.toLowerCase().endsWith(".jfif") ||
+      fileName.toLowerCase().endsWith(".jpg") ||
+      fileName.toLowerCase().endsWith(".jpeg")
+    ) {
+      cleanMime = "image/jpeg";
+    } else if (cleanMime === "image/png" || fileName.toLowerCase().endsWith(".png")) {
+      cleanMime = "image/png";
+    } else if (cleanMime === "image/webp" || fileName.toLowerCase().endsWith(".webp")) {
+      cleanMime = "image/webp";
+    } else {
       cleanMime = "image/jpeg";
     }
 
-    const payload = {
-      contents: [
-        {
-          parts: [
-            { text: promptText },
-            {
-              inline_data: {
-                mime_type: cleanMime,
-                data: imageBase64,
-              },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        response_mime_type: "application/json",
-        temperature: 0.2,
-      },
-    };
+    const { text, modelUsed } = await callGeminiGenerateContent(
+      apiKey,
+      resolvedModel,
+      promptText,
+      cleanMime,
+      imageBase64
+    );
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(
-      GEMINI_API_KEY
-    )}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(60000),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini Vision API error (${response.status}): ${errText}`);
-    }
-
-    const geminiData = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>;
-        };
-      }>;
-    };
-
-    rawJsonText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    modelIdentifier = `${modelUsed} (Google Hosted Vision)`;
+    rawJsonText = text;
   }
 
   if (!rawJsonText || rawJsonText.trim() === "") {
