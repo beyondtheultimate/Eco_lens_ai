@@ -12,6 +12,17 @@ export const CitationSchema = z.object({
   title: z.string(),
   url: z.string().url().or(z.string()),
   guidelineSnippet: z.string(),
+  applicableRegion: z.string().optional(),
+  materialCategory: z.string().optional(),
+  verifiedDate: z.string().optional(),
+});
+
+export const ReuseIdeaDetailSchema = z.object({
+  title: z.string(),
+  difficulty: z.enum(["Easy", "Moderate", "Advanced"]).default("Easy"),
+  requiredMaterials: z.array(z.string()).default([]),
+  steps: z.array(z.string()).default([]),
+  safetyNotes: z.string().optional(),
 });
 
 export const WasteAnalysisResultSchema = z.object({
@@ -35,13 +46,16 @@ export const WasteAnalysisResultSchema = z.object({
   disposalInstructions: z.array(z.string()).min(1),
   contaminationRisk: z.string(),
   uncertaintyWarnings: z.array(z.string()),
-  reuseSuggestions: z.array(z.string()).length(3, "Must provide exactly 3 practical reuse suggestions"),
+  reuseSuggestions: z.array(z.string()).min(3, "Must provide at least 3 practical reuse suggestions"),
+  detailedReusePlans: z.array(ReuseIdeaDetailSchema).optional(),
   citations: z.array(CitationSchema),
   estimatedCarbonSavedKg: z.number().nonnegative(),
   modelUsed: z.string(),
   analyzedAt: z.string(),
+  municipalityNote: z.string().optional().default("Local municipal acceptance varies. Check with your city's waste authority."),
 });
 
 export type WasteAnalysisResult = z.infer<typeof WasteAnalysisResultSchema>;
 export type MaterialEstimate = z.infer<typeof MaterialEstimateSchema>;
 export type Citation = z.infer<typeof CitationSchema>;
+export type ReuseIdeaDetail = z.infer<typeof ReuseIdeaDetailSchema>;

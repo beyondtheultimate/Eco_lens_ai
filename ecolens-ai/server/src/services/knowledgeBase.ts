@@ -1,4 +1,4 @@
-import { Citation } from "../schemas/analysisSchema.js";
+import { Citation, ReuseIdeaDetail } from "../schemas/analysisSchema.js";
 
 export interface KnowledgeEntry {
   category: string;
@@ -8,6 +8,7 @@ export interface KnowledgeEntry {
   standardDisposal: string[];
   contaminationWarnings: string[];
   defaultReuseIdeas: [string, string, string];
+  defaultDetailedReusePlans?: ReuseIdeaDetail[];
   averageCo2SavedKg: number;
   citations: Citation[];
 }

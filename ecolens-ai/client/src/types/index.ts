@@ -10,6 +10,17 @@ export interface Citation {
   title: string;
   url: string;
   guidelineSnippet: string;
+  applicableRegion?: string;
+  materialCategory?: string;
+  verifiedDate?: string;
+}
+
+export interface ReuseIdeaDetail {
+  title: string;
+  difficulty: "Easy" | "Moderate" | "Advanced";
+  requiredMaterials: string[];
+  steps: string[];
+  safetyNotes?: string;
 }
 
 export interface WasteAnalysisResult {
@@ -32,11 +43,13 @@ export interface WasteAnalysisResult {
   disposalInstructions: string[];
   contaminationRisk: string;
   uncertaintyWarnings: string[];
-  reuseSuggestions: [string, string, string];
+  reuseSuggestions: string[];
+  detailedReusePlans?: ReuseIdeaDetail[];
   citations: Citation[];
   estimatedCarbonSavedKg: number;
   modelUsed: string;
   analyzedAt: string;
+  municipalityNote?: string;
 }
 
 export interface HistoryItem {
