@@ -6,6 +6,7 @@ import type {
   VisionHealthStatus,
 } from "../types";
 import { optimizeImageForVision } from "../utils/imageOptimizer";
+import { createGlassFallbackResult } from "../utils/fallbackReuse";
 
 const API_BASE = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 
@@ -19,8 +20,16 @@ interface AnalysisContextType {
   visionHealth: VisionHealthStatus | null;
   checkingHealth: boolean;
   history: HistoryItem[];
+  simulateAiFailure: boolean;
+  setSimulateAiFailure: (val: boolean) => void;
   checkHealth: () => Promise<void>;
-  runAnalysis: (file: File, previewUrl: string, municipality?: string) => Promise<boolean>;
+  runAnalysis: (
+    file: File,
+    previewUrl: string,
+    municipality?: string,
+    simulateFailure?: boolean
+  ) => Promise<boolean>;
+  applyFallbackResult: (reason?: string, municipality?: string) => void;
   clearCurrent: () => void;
   clearHistory: () => void;
   deleteHistoryItem: (id: string) => void;
@@ -46,6 +55,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [actionHelp, setActionHelp] = useState<string | null>(null);
+  const [simulateAiFailure, setSimulateAiFailure] = useState<boolean>(false);
 
   const [health, setHealth] = useState<OllamaHealthStatus | null>(null);
   const [visionHealth, setVisionHealth] = useState<VisionHealthStatus | null>(null);
@@ -91,7 +101,8 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const runAnalysis = async (
     file: File,
     previewUrl: string,
-    municipality?: string
+    municipality?: string,
+    simulateFailure?: boolean
   ): Promise<boolean> => {
     setIsLoading(true);
     setErrorMsg(null);
@@ -108,6 +119,9 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       formData.append("image", payloadFile);
       if (municipality && municipality.trim() !== "") {
         formData.append("municipality", municipality.trim());
+      }
+      if (simulateFailure || simulateAiFailure) {
+        formData.append("simulateAiFailure", "true");
       }
 
       // 55-second client timeout controller (coordinates with 45s backend timeout and 60s Vercel ceiling)
@@ -168,6 +182,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         error?: string;
         message?: string;
         actionRequired?: string;
+        fallbackData?: WasteAnalysisResult;
       };
 
       try {
@@ -183,6 +198,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         throw {
           message: json.message || json.error || `Analysis failed with HTTP status ${response.status}.`,
           actionRequired: json.actionRequired,
+          fallbackData: json.fallbackData,
         };
       }
 
@@ -204,15 +220,46 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       return true;
     } catch (err: unknown) {
-      const e = err as { message?: string; actionRequired?: string };
-      setErrorMsg(e.message || "An unexpected error occurred during analysis.");
+      const e = err as {
+        message?: string;
+        actionRequired?: string;
+        fallbackData?: WasteAnalysisResult;
+      };
+      const failureReason = e.message || "Upstream AI vision model temporarily unavailable.";
+      setErrorMsg(failureReason);
       if (e.actionRequired) {
         setActionHelp(e.actionRequired);
       }
-      return false;
+
+      // Construct and activate the verified rule-based glass fallback result
+      // instead of leaving the user stranded on an error screen
+      const fallbackResult: WasteAnalysisResult =
+        e.fallbackData || createGlassFallbackResult(failureReason, municipality);
+
+      setLatestResult(fallbackResult);
+      sessionStorage.setItem("ecolens_latest_result", JSON.stringify(fallbackResult));
+
+      const fallbackHistoryItem: HistoryItem = {
+        id: `${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        imagePreviewUrl: previewUrl,
+        result: fallbackResult,
+      };
+
+      const updatedHistory = [fallbackHistoryItem, ...history.slice(0, 49)];
+      setHistory(updatedHistory);
+      localStorage.setItem("ecolens_history", JSON.stringify(updatedHistory));
+
+      return true;
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const applyFallbackResult = (reason?: string, municipality?: string) => {
+    const fallbackResult = createGlassFallbackResult(reason, municipality);
+    setLatestResult(fallbackResult);
+    sessionStorage.setItem("ecolens_latest_result", JSON.stringify(fallbackResult));
   };
 
   const clearCurrent = () => {
@@ -254,8 +301,11 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         visionHealth,
         checkingHealth,
         history,
+        simulateAiFailure,
+        setSimulateAiFailure,
         checkHealth,
         runAnalysis,
+        applyFallbackResult,
         clearCurrent,
         clearHistory,
         deleteHistoryItem,

@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   Scan,
   Compass,
+  RotateCcw,
+  ShieldAlert,
 } from "lucide-react";
 import { useAnalysis } from "../context/AnalysisContext";
 
@@ -79,65 +81,195 @@ export const ReusePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Case 1: Result-Driven Studio from genuine scan */}
+      {/* Case 1: Result-Driven Studio from genuine scan or verified fallback */}
       {latestResult ? (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                <span>Tailored Upcycling Plans for:</span>
-                <span className="text-teal-400">{latestResult.itemName}</span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                Category: {latestResult.primaryCategory} • Material: {latestResult.materials.map(m => m.material).join(", ")}
-              </p>
-            </div>
-
-            <Link
-              to="/scanner"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium"
-            >
-              <Scan className="h-3.5 w-3.5 text-teal-400" /> Analyze Another Item
-            </Link>
-          </div>
-
-          {/* Cards for each idea */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {latestResult.reuseSuggestions.map((suggestion, idx) => (
-              <div
-                key={idx}
-                className="rounded-2xl bg-slate-900/60 border border-teal-900/40 p-6 flex flex-col justify-between space-y-4 hover:border-teal-500/40 transition-all shadow-lg"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-teal-500/15 text-teal-300 border border-teal-500/30">
-                      Idea #{idx + 1}
-                    </span>
-                    <span className="text-xs font-semibold text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40">
-                      Circular Reuse
-                    </span>
+          {/* Fallback Notice Banner */}
+          {latestResult.isFallback && (
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/60 via-amber-900/40 to-slate-900 border border-amber-600/50 shadow-xl space-y-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/40">
+                    <AlertTriangle className="h-5 w-5" />
                   </div>
-
-                  <h3 className="text-base font-bold text-slate-100">{suggestion}</h3>
-
-                  <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-2 text-xs text-slate-300">
-                    <div className="flex items-center gap-1.5 text-teal-400 font-semibold text-[11px]">
-                      <Wrench className="h-3.5 w-3.5" />
-                      <span>Recommended Tooling:</span>
-                    </div>
-                    <p className="text-slate-400 text-[11px]">
-                      Scissors, utility knife, organic soil, or non-toxic twine depending on household application.
+                  <div>
+                    <h3 className="text-base font-bold text-amber-200">
+                      Fallback Reuse Suggestions — AI analysis unavailable
+                    </h3>
+                    <p className="text-xs text-amber-300/80">
+                      {latestResult.fallbackReason || "Upstream AI vision model temporarily unavailable."}
                     </p>
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                  <span className="flex items-center gap-1 text-[11px]">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> Diverts from Landfill
-                  </span>
-                </div>
+                <Link
+                  to="/scanner"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-amber-950/50 transition-all shrink-0 hover:scale-[1.02]"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  <span>Try AI analysis again</span>
+                </Link>
               </div>
-            ))}
+
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-amber-900/40 text-xs text-slate-300">
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Showing verified offline repurposing plans. No AI confidence scores or speculative material breakdowns were generated.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Prominent Safety Warning Banner */}
+          {latestResult.safetyWarning && (
+            <div className="p-5 rounded-2xl bg-rose-950/50 border-2 border-rose-600/70 shadow-lg space-y-2">
+              <div className="flex items-center gap-2.5 text-rose-300 font-black text-sm uppercase tracking-wider">
+                <ShieldAlert className="h-5 w-5 text-rose-400 animate-pulse" />
+                <span>Critical Safety Warning</span>
+              </div>
+              <p className="text-sm text-rose-100 font-bold leading-relaxed">
+                {latestResult.safetyWarning}
+              </p>
+              {latestResult.suitabilityNotes && (
+                <div className="pt-2 border-t border-rose-900/40 text-xs text-rose-200/90 leading-relaxed">
+                  <strong>Repurposing Suitability:</strong> {latestResult.suitabilityNotes}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div>
+              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <span>
+                  {latestResult.isFallback ? "Verified Upcycling Guidelines for:" : "Tailored Upcycling Plans for:"}
+                </span>
+                <span className="text-teal-400">{latestResult.itemName}</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Category: {latestResult.primaryCategory} • Protocol: {latestResult.modelUsed}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                to="/results"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-medium"
+              >
+                View Full Audit
+              </Link>
+              <Link
+                to="/scanner"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm"
+              >
+                <Scan className="h-3.5 w-3.5" /> Analyze Another Item
+              </Link>
+            </div>
+          </div>
+
+          {/* Cards for each idea: Detailed Plans if present, otherwise basic suggestions */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {latestResult.detailedReusePlans && latestResult.detailedReusePlans.length > 0 ? (
+              latestResult.detailedReusePlans.map((plan, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl bg-slate-900/60 border border-teal-900/40 p-6 flex flex-col justify-between space-y-4 hover:border-teal-500/40 transition-all shadow-lg"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                        Idea #{idx + 1}
+                      </span>
+                      <span className="text-xs font-semibold text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40">
+                        {plan.difficulty}
+                      </span>
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-100">{plan.title}</h3>
+
+                    {plan.requiredMaterials.length > 0 && (
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Required Equipment:
+                        </span>
+                        <ul className="space-y-1 text-xs text-slate-300">
+                          {plan.requiredMaterials.map((mat, mIdx) => (
+                            <li key={mIdx} className="flex items-center gap-1.5">
+                              <span className="h-1 w-1 rounded-full bg-teal-400"></span>
+                              <span>{mat}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {plan.steps.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Step-by-Step Instructions:
+                        </span>
+                        <ol className="space-y-1.5 text-xs text-slate-300">
+                          {plan.steps.map((step, sIdx) => (
+                            <li key={sIdx} className="flex items-start gap-2">
+                              <span className="text-[10px] font-bold text-teal-400 mt-0.5">{sIdx + 1}.</span>
+                              <span>{step}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+
+                    {plan.safetyNotes && (
+                      <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-900/40 text-[11px] text-amber-300/90 flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                        <span>{plan.safetyNotes}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                    <span className="flex items-center gap-1 text-[11px]">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> Safe Repurposing Stream
+                    </span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              latestResult.reuseSuggestions.map((suggestion, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-2xl bg-slate-900/60 border border-teal-900/40 p-6 flex flex-col justify-between space-y-4 hover:border-teal-500/40 transition-all shadow-lg"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold uppercase bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                        Idea #{idx + 1}
+                      </span>
+                      <span className="text-xs font-semibold text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/40">
+                        Circular Reuse
+                      </span>
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-100">{suggestion}</h3>
+
+                    <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-2 text-xs text-slate-300">
+                      <div className="flex items-center gap-1.5 text-teal-400 font-semibold text-[11px]">
+                        <Wrench className="h-3.5 w-3.5" />
+                        <span>Recommended Tooling:</span>
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Cut-resistant gloves, safety goggles, or rigid container depending on glass application.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                    <span className="flex items-center gap-1 text-[11px]">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> Safe Circular Life
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       ) : (

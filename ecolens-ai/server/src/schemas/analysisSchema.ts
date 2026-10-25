@@ -53,6 +53,10 @@ export const WasteAnalysisResultSchema = z.object({
   modelUsed: z.string(),
   analyzedAt: z.string(),
   municipalityNote: z.string().optional().default("Local municipal acceptance varies. Check with your city's waste authority."),
+  isFallback: z.boolean().optional(),
+  fallbackReason: z.string().optional(),
+  safetyWarning: z.string().optional(),
+  suitabilityNotes: z.string().optional(),
 });
 
 export type WasteAnalysisResult = z.infer<typeof WasteAnalysisResultSchema>;

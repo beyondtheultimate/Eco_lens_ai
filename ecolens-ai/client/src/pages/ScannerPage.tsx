@@ -29,6 +29,9 @@ export const ScannerPage: React.FC = () => {
     checkingHealth,
     checkHealth,
     clearCurrent,
+    simulateAiFailure,
+    setSimulateAiFailure,
+    applyFallbackResult,
   } = useAnalysis();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -41,10 +44,22 @@ export const ScannerPage: React.FC = () => {
   const handleStartAnalysis = async () => {
     if (!selectedFile) return;
     const previewUrl = URL.createObjectURL(selectedFile);
-    const success = await runAnalysis(selectedFile, previewUrl, municipality);
+    const success = await runAnalysis(selectedFile, previewUrl, municipality, simulateAiFailure);
     if (success) {
       navigate("/results");
     }
+  };
+
+  const handleDirectFallback = () => {
+    if (selectedFile) {
+      const previewUrl = URL.createObjectURL(selectedFile);
+      sessionStorage.setItem("ecolens_latest_preview", previewUrl);
+    }
+    applyFallbackResult(
+      "Direct manual inspection protocol requested for glass reuse.",
+      municipality
+    );
+    navigate("/results");
   };
 
   const handleClear = () => {
@@ -150,40 +165,63 @@ export const ScannerPage: React.FC = () => {
             onClear={handleClear}
           />
 
-          {/* Optional Municipality / District Field */}
-          <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          {/* Optional Municipality / District Field & Demo Mode Toggle */}
+          <div className="p-4 rounded-xl bg-slate-900/40 border border-slate-800/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs text-slate-300">
               <MapPin className="h-4 w-4 text-cyan-400 shrink-0" />
               <span>Optional: Specify your City / Municipality:</span>
             </div>
-            <input
-              type="text"
-              value={municipality}
-              onChange={(e) => setMunicipality(e.target.value)}
-              placeholder="e.g. Seattle, WA (Single-Stream)"
-              className="w-full sm:w-64 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/60 transition-colors"
-            />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full md:w-auto">
+              <input
+                type="text"
+                value={municipality}
+                onChange={(e) => setMunicipality(e.target.value)}
+                placeholder="e.g. Seattle, WA (Single-Stream)"
+                className="w-full sm:w-64 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500/60 transition-colors"
+              />
+              <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-amber-900/40 text-[11px] text-amber-300/90 cursor-pointer hover:border-amber-700/60 transition-colors shrink-0">
+                <input
+                  type="checkbox"
+                  checked={simulateAiFailure}
+                  onChange={(e) => setSimulateAiFailure(e.target.checked)}
+                  className="rounded bg-slate-900 border-amber-700/60 text-amber-500 focus:ring-0 focus:ring-offset-0 h-3 w-3 cursor-pointer"
+                />
+                <span>Simulate AI Failure (Demo Fallback)</span>
+              </label>
+            </div>
           </div>
 
-          {/* Action Trigger Button */}
+          {/* Action Trigger Buttons */}
           {selectedFile && (
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleClear}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-800 transition-all"
-              >
-                Clear Selection
-              </button>
-              <button
-                type="button"
-                onClick={handleStartAnalysis}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02]"
-              >
-                <Scan className="h-4 w-4" />
-                <span>Run Resource & Analyze</span>
-                <ArrowRight className="h-4 w-4" />
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <div className="text-[11px] text-slate-500">
+                {simulateAiFailure ? (
+                  <span className="text-amber-400 font-semibold">
+                    Demo Mode Active: Will demonstrate the verified glass fallback protocol.
+                  </span>
+                ) : (
+                  <span>Ready for multimodal vision tokenization.</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-800 transition-all"
+                >
+                  Clear Selection
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartAnalysis}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold shadow-lg shadow-emerald-950/40 flex items-center gap-2 transition-all hover:scale-[1.02]"
+                >
+                  <Scan className="h-4 w-4" />
+                  <span>Run Resource & Analyze</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -194,7 +232,19 @@ export const ScannerPage: React.FC = () => {
                 <AlertCircle className="h-5 w-5 text-rose-400" />
                 <span>Analysis Encountered an Issue</span>
               </div>
-              <p className="text-xs text-rose-200/90 leading-relaxed font-mono whitespace-pre-wrap">{errorMsg}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-rose-900/40">
+                <span className="text-[11px] text-rose-300/80">
+                  AI inference unavailable. You can still access verified handling & circular reuse guides.
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDirectFallback}
+                  className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <span>View Fallback Reuse Suggestions</span>
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
               {actionHelp && (
                 <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-900/40 text-xs text-cyan-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                   <div className="flex items-start gap-2">

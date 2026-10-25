@@ -198,6 +198,37 @@ async function runTests() {
   assert.equal(normalizedMaterials[0].recyclable, true);
   console.log(" [PASS] AI output schema normalization verified.");
 
+  // 7. Glass Fallback Result & Safety Validation Test
+  console.log("Test 7: Verified Glass Fallback Structure & Safety Assertions...");
+  const { createGlassFallbackResult } = await import("../src/services/fallbackService.js");
+
+  const fallback = createGlassFallbackResult("Simulated high demand 503 error", "Portland, OR");
+  assert.equal(fallback.isFallback, true, "Fallback flag must be true");
+  assert.equal(fallback.primaryCategory, "Glass", "Category must be Glass");
+  assert.equal(fallback.estimatedCarbonSavedKg, 0, "Carbon abatement must not be fabricated (honest 0)");
+  assert.equal(fallback.certainty, "low", "Certainty must be low/unverified");
+  assert.ok(
+    fallback.safetyWarning?.includes("Broken glass has sharp edges. Do not handle it with bare hands. Keep it away from children and pets."),
+    "Must include mandatory glass sharp edges safety warning"
+  );
+  assert.ok(
+    fallback.suitabilityNotes?.includes("Broken glass is generally not suitable for a planter or ordinary household craft unless the design fully isolates the sharp pieces."),
+    "Must explain planter unsuitability"
+  );
+
+  // Assert user-requested ideas are present
+  const mosaicIdea = fallback.reuseSuggestions.some((s) => s.toLowerCase().includes("glass mosaic art"));
+  const decorativeIdea = fallback.reuseSuggestions.some((s) => s.toLowerCase().includes("decorative display"));
+  const recyclingIdea = fallback.reuseSuggestions.some((s) => s.toLowerCase().includes("glass recycling"));
+
+  assert.ok(mosaicIdea, "Must include Glass mosaic art idea");
+  assert.ok(decorativeIdea, "Must include Decorative display idea");
+  assert.ok(recyclingIdea, "Must include Glass recycling idea");
+
+  const fallbackValidation = WasteAnalysisResultSchema.safeParse(fallback);
+  assert.ok(fallbackValidation.success, "Fallback object must fully satisfy WasteAnalysisResultSchema");
+  console.log(" [PASS] Glass fallback structure and safety rules verified.");
+
   console.log("=== ALL BACKEND UNIT TESTS PASSED ===");
 }
 

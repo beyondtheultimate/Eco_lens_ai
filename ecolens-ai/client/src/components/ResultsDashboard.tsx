@@ -52,6 +52,63 @@ export const ResultsDashboard: React.FC<ResultsDashboardProps> = ({
 
   return (
     <div className="w-full space-y-6 animate-in fade-in duration-500">
+      {/* Fallback Notice Banner */}
+      {result.isFallback && (
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-amber-950/60 via-amber-900/40 to-slate-900 border border-amber-600/50 shadow-xl space-y-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center shrink-0 border border-amber-500/40">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-amber-200">
+                  Fallback Reuse Suggestions — AI analysis unavailable
+                </h3>
+                <p className="text-xs text-amber-300/80">
+                  {result.fallbackReason || "Upstream AI vision model temporarily unavailable."}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onReset}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-amber-950/50 transition-all shrink-0 hover:scale-[1.02]"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Try AI analysis again</span>
+            </button>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-950/70 border border-amber-900/40 text-xs text-slate-300 space-y-1">
+            <p className="font-semibold text-amber-300">
+              Deterministic Safety & Repurposing Protocol Active:
+            </p>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Showing verified offline handling and upcycling guidelines. AI confidence scores, material percentages, and lifecycle CO₂e abatement are not fabricated without active vision model inference.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Prominent Safety Warning Banner */}
+      {result.safetyWarning && (
+        <div className="p-5 rounded-2xl bg-rose-950/50 border-2 border-rose-600/70 shadow-lg space-y-2">
+          <div className="flex items-center gap-2.5 text-rose-300 font-black text-sm uppercase tracking-wider">
+            <ShieldAlert className="h-5 w-5 text-rose-400 animate-pulse" />
+            <span>Critical Safety Warning</span>
+          </div>
+          <p className="text-sm text-rose-100 font-bold leading-relaxed">
+            {result.safetyWarning}
+          </p>
+          {result.suitabilityNotes && (
+            <div className="pt-2 border-t border-rose-900/40 text-xs text-rose-200/90 leading-relaxed">
+              <strong>Repurposing Suitability:</strong> {result.suitabilityNotes}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Top Action Bar */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
         <div className="flex items-center gap-2">

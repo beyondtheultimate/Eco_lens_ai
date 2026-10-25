@@ -1,9 +1,15 @@
 import { Request, Response } from "express";
 import { analyzeImageWithGemma, checkVisionHealth } from "../services/ollamaService.js";
+import { createGlassFallbackResult } from "../services/fallbackService.js";
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export async function analyzeHandler(req: Request, res: Response): Promise<void> {
+  // Extract optional municipality from request body
+  const municipality = req.body?.municipality
+    ? String(req.body.municipality).trim()
+    : undefined;
+
   try {
     if (!req.file) {
       res.status(400).json({
@@ -57,10 +63,12 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Extract optional municipality from request body
-    const municipality = req.body?.municipality
-      ? String(req.body.municipality).trim()
-      : undefined;
+    // Check for explicit AI failure simulation for testing/demo purposes
+    if (req.body?.simulateAiFailure === true || req.body?.simulateAiFailure === "true") {
+      throw new Error(
+        "Gemini Vision API error (HTTP 503): This model is currently experiencing high demand. (Simulated AI Failure for Hackathon Demo)"
+      );
+    }
 
     // Convert buffer to base64
     const base64Data = buffer.toString("base64");
@@ -80,6 +88,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
   } catch (error) {
     const err = error as Error;
     const msg = err.message || "Unknown error during waste analysis.";
+    const fallbackData = createGlassFallbackResult(msg, municipality);
 
     // If model is not available or Ollama unreachable
     if (
@@ -97,6 +106,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
           : "Configure GEMINI_API_KEY in your Vercel Project Settings > Environment Variables. Get a free API key at https://aistudio.google.com/apikey",
         setupUrl: "https://aistudio.google.com/apikey",
         status: health,
+        fallbackData,
       });
       return;
     }
@@ -109,6 +119,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         actionRequired:
           "Configure a valid GEMINI_API_KEY in Vercel Project Settings > Environment Variables (https://aistudio.google.com/apikey).",
         setupUrl: "https://aistudio.google.com/apikey",
+        fallbackData,
       });
       return;
     }
@@ -125,6 +136,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         actionRequired:
           "Gemini free tier per-minute quota reached. Please wait 15-30 seconds before analyzing another image.",
         setupUrl: "https://aistudio.google.com/",
+        fallbackData,
       });
       return;
     }
@@ -137,6 +149,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         actionRequired:
           "Set GEMINI_MODEL in Vercel Environment Variables to a model supported by your key (e.g. gemini-3.8-flash, gemini-2.5-flash, gemini-2.0-flash).",
         setupUrl: "https://aistudio.google.com/apikey",
+        fallbackData,
       });
       return;
     }
@@ -155,6 +168,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         actionRequired:
           "Please try uploading a smaller or compressed image, or retry in a few moments. High-resolution photos can cause upstream vision queue delays.",
         setupUrl: "https://aistudio.google.com/apikey",
+        fallbackData,
       });
       return;
     }
@@ -172,6 +186,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
         actionRequired:
           "Google's Gemini vision models are experiencing temporary peak load across regions. The automatic retry and fallback sequence was attempted. Please wait 10-20 seconds and click 'Run Resource & Analyze' again.",
         setupUrl: "https://aistudio.google.com/",
+        fallbackData,
       });
       return;
     }
@@ -179,6 +194,7 @@ export async function analyzeHandler(req: Request, res: Response): Promise<void>
     res.status(500).json({
       error: "ANALYSIS_FAILED",
       message: msg,
+      fallbackData,
     });
   }
 }

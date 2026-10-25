@@ -50,6 +50,10 @@ export interface WasteAnalysisResult {
   modelUsed: string;
   analyzedAt: string;
   municipalityNote?: string;
+  isFallback?: boolean;
+  fallbackReason?: string;
+  safetyWarning?: string;
+  suitabilityNotes?: string;
 }
 
 export interface HistoryItem {
