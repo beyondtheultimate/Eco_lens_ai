@@ -1,0 +1,24 @@
+{
+  "name": "eco-lens-ai",
+  "version": "1.0.0",
+  "description": "EcoLens AI - Gemma 4 Circular Waste Intelligence & Optical Material Breakdown",
+  "scripts": {
+    "dev": "npm --prefix ecolens-ai/server run dev",
+    "dev:client": "npm --prefix ecolens-ai/client run dev",
+    "build:server": "npm --prefix ecolens-ai/server run build",
+    "build:client": "npm --prefix ecolens-ai/client run build",
+    "build": "npm run build:server && npm run build:client",
+    "test": "npm --prefix ecolens-ai/server test"
+  },
+  "keywords": [
+    "ecolens",
+    "gemma4",
+    "mlh-hackathon",
+    "circular-economy",
+    "computer-vision",
+    "waste-classification",
+    "ollama"
+  ],
+  "author": "EcoLens AI Team",
+  "license": "MIT"
+}
