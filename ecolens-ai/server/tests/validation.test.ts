@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { app } from "../src/app.js";
+import { WasteAnalysisResultSchema } from "../src/schemas/analysisSchema.js";
 
 async function testValidation() {
   console.log("=== RUNNING API ENDPOINT VALIDATION TESTS ===");
@@ -65,6 +66,49 @@ async function testValidation() {
     });
     assert.notEqual(resJfif.status, 400, "JFIF file must not be rejected with 400 INVALID_FILE_TYPE");
     console.log(" [PASS] JFIF image successfully accepted by upload validation.");
+
+    // 5. Test POST /api/analyze with simulated AI failure flag
+    console.log("Test: POST /api/analyze with simulateAiFailure=true (Fallback Demonstration)...");
+    const formDataSim = new FormData();
+    formDataSim.append("image", jfifBlob, "test_broken_glass.jfif");
+    formDataSim.append("simulateAiFailure", "true");
+    formDataSim.append("municipality", "Austin, TX");
+
+    const resSim = await fetch("http://localhost:5099/api/analyze", {
+      method: "POST",
+      body: formDataSim,
+    });
+    assert.equal(resSim.status, 503, "Should return HTTP 503 for simulated upstream AI high demand");
+    const jsonSim = (await resSim.json()) as { error: string; fallbackData: any };
+    assert.equal(jsonSim.error, "AI_SERVICE_HIGH_DEMAND");
+    assert.ok(jsonSim.fallbackData, "Must provide fallbackData payload");
+
+    const fb = jsonSim.fallbackData;
+    assert.equal(fb.isFallback, true);
+    assert.equal(fb.primaryCategory, "Glass");
+    assert.equal(fb.estimatedCarbonSavedKg, 0);
+    assert.ok(
+      fb.reuseSuggestions.some((s: string) => s.toLowerCase().includes("glass mosaic art")),
+      "Must include glass mosaic art idea"
+    );
+    assert.ok(
+      fb.reuseSuggestions.some((s: string) => s.toLowerCase().includes("decorative display")),
+      "Must include decorative display idea"
+    );
+    assert.ok(
+      fb.reuseSuggestions.some((s: string) => s.toLowerCase().includes("glass recycling")),
+      "Must include glass recycling idea"
+    );
+    assert.ok(
+      fb.safetyWarning.includes("Broken glass has sharp edges. Do not handle it with bare hands. Keep it away from children and pets.")
+    );
+    assert.ok(
+      fb.suitabilityNotes.includes("Broken glass is generally not suitable for a planter or ordinary household craft unless the design fully isolates the sharp pieces.")
+    );
+
+    const schemaParsed = WasteAnalysisResultSchema.safeParse(fb);
+    assert.ok(schemaParsed.success, "Fallback data must strictly satisfy schema");
+    console.log(" [PASS] Simulated AI failure correctly returns verified glass fallback data.");
 
     console.log("=== ALL API VALIDATION TESTS PASSED ===");
   } finally {
